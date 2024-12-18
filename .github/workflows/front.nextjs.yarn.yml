@@ -47,6 +47,16 @@ jobs:
       - name: Run build
         run: yarn build
 
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextjs-build
+          retention-days: 2
+          path: |
+            .next/standalone
+            .next/static
+            ./public
+
   unit-test:
     name: Unit tests
     needs: [build]
@@ -116,7 +126,7 @@ jobs:
     needs: [build]
     runs-on: ubuntu-latest
     steps:
-      - name: "Analyse project for vulnerabilities"
+      - name: Analyse project for vulnerabilities
         uses: phorus-group/vulnerability-analysis-action@main
         with:
           skip-dirs: node_modules,.git
@@ -127,7 +137,12 @@ jobs:
     if: ${{ !cancelled() && needs.unit-test.result == 'success' && needs.integration-test.result == 'success' && needs.code-quality.result == 'success' && needs.vulnerability-analysis.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - name: "Build and push (default branch only) Docker image"
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: nextjs-build
+
+      - name: Build and push (default branch only) Docker image
         uses: phorus-group/docker-action@main
         with:
           dockerfile-template-path: "dockerfiles/Dockerfile.nextjs"
