@@ -3,6 +3,16 @@ name: Reusable workflow example
 on:
   workflow_call:
     inputs:
+      disable-unit-test:
+        description: "Disable unit testing job"
+        type: string
+        required: false
+        default: "false"
+      disable-integration-test:
+        description: "Disable integration testing job"
+        type: string
+        required: false
+        default: "false"
       code-quality-info-threshold:
         description: "The number of findings of this severity allowed before the job returns a failure"
         type: number
@@ -59,6 +69,7 @@ jobs:
 
   unit-test:
     name: Unit tests
+    if: ${{ inputs.disable-unit-test != 'true' }}
     needs: [build]
     runs-on: ubuntu-latest
     steps:
@@ -85,6 +96,7 @@ jobs:
 
   integration-test:
     name: Integration tests
+    if: ${{ inputs.disable-integration-test != 'true' }}
     needs: [build]
     runs-on: ubuntu-latest
     steps:
@@ -109,9 +121,9 @@ jobs:
     needs: [build]
     runs-on: ubuntu-latest
     steps:
-      - name: fail if conditional job failed
-        if: ${{ needs.conditional_job.result == 'failure' }}
-        run: exit 1
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Check code quality
         uses: phorus-group/code-quality-action@main
         with:
@@ -126,6 +138,9 @@ jobs:
     needs: [build]
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Analyse project for vulnerabilities
         uses: phorus-group/vulnerability-analysis-action@main
         with:
