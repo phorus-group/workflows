@@ -1,4 +1,4 @@
-name: Verify Action
+name: Internal dummy workflow
 
 on:
   pull_request:
