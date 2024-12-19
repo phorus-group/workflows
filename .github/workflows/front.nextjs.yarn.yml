@@ -13,6 +13,11 @@ on:
         type: string
         required: false
         default: "false"
+      gh-advanced-security:
+        description: "Enable if you have GitHub Advanced Security"
+        type: boolean
+        required: false
+        default: false
       code-quality-info-threshold:
         description: "The number of findings of this severity allowed before the job returns a failure"
         type: number
@@ -148,6 +153,7 @@ jobs:
         uses: phorus-group/vulnerability-analysis-action@main
         with:
           skip-dirs: node_modules,.git
+          upload-sarif: ${{ inputs.gh-advanced-security }}
 
   docker:
     name: Docker build and push
