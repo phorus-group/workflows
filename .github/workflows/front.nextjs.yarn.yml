@@ -100,7 +100,7 @@ jobs:
       - name: Run storybook tests
         uses: phorus-group/yarn-test-action@main
         with:
-          command: test:storybook
+          command: test:storybook:ci
 
   integration-test:
     name: Integration tests
