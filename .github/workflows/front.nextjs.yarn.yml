@@ -175,6 +175,7 @@ jobs:
   enforce-all-checks:
     name: Enforce all checks
     needs: [docker]
+    if: ${{ github.ref_name != github.event.repository.default_branch }}
     runs-on: ubuntu-latest
     permissions:
       checks: read
