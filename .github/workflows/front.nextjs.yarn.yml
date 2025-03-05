@@ -184,4 +184,4 @@ jobs:
         uses: poseidon/wait-for-status-checks@main
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          ignore: Enforce all checks
+          ignore: "Enforce all checks,default-workflow / Enforce all checks"
