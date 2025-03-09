@@ -154,6 +154,7 @@ jobs:
       - name: Build and push (default branch only) Docker image
         uses: phorus-group/docker-action@main
         with:
+          dockerfile-path: "dockerfiles/Dockerfile.nextjs"
           push: true
 
   enforce-all-checks:
