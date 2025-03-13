@@ -18,6 +18,16 @@ on:
         type: string
         required: false
         default: "private"
+      auth-key:
+        description: "Auth key to use inside ~/.npmrc"
+        type: string
+        required: false
+        default: "authToken"
+      auth-value:
+        description: "Auth value to use inside ~/.npmrc"
+        type: string
+        required: false
+        default: ${{ github.token }}
       disable-unit-test:
         description: "Disable unit testing job"
         type: string
@@ -88,7 +98,8 @@ jobs:
       - name: Get published version from GitHub Package Registry
         id: published
         run: |
-          echo "//${{ inputs.registry }}/:_authToken=${{ github.token }}" > ~/.npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ inputs.auth-value }}" > ~/.npmrc
+          echo "always-auth=true" >> ~/.npmrc
           PUBLISHED_VERSION=$(npm view ${{ steps.package.outputs.name }} version --registry=${{ inputs.registry }} || echo "0.0.0")
           echo "version=$PUBLISHED_VERSION" >> $GITHUB_OUTPUT
 
@@ -233,8 +244,9 @@ jobs:
 
       - name: Configure npm registry globally in ~/.npmrc
         run: |
-          echo "//${{ inputs.registry }}/:_authToken=${{ github.token }}" > ~/.npmrc
-          echo "${{ needs.validate-version.outputs.package-scope }}:registry=${{ inputs.registry }}" >> ~/.npmrc
+          echo "${{ needs.validate-version.outputs.package-scope }}:registry=${{ inputs.registry }}" > ~/.npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ inputs.auth-value }}" >> ~/.npmrc
+          echo "always-auth=true" >> ~/.npmrc
 
       - name: Publish package
         run: yarn publish --non-interactive --access ${{ inputs.access }}
