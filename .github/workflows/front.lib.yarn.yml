@@ -109,7 +109,9 @@ jobs:
           node-version: ${{ inputs.node-version }}
 
       - name: Install semver package
-        run: npm install semver
+        run: |
+          rm -f package.json package-lock.json yarn.lock
+          npm install semver
 
       - name: Validate version
         env:
