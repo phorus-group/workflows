@@ -1,4 +1,4 @@
-name: Reusable workflow to build and publish a NextJS docker image to GHCR
+name: Reusable library workflow to build and publish a library
 
 on:
   workflow_call:
@@ -8,6 +8,26 @@ on:
         type: string
         required: false
         default: "22.2.0"
+      registry:
+        description: "NPM registry to use"
+        type: string
+        required: false
+        default: "https://npm.pkg.github.com"
+      access:
+        description: "Package access. public / private"
+        type: string
+        required: false
+        default: "private"
+      auth-key:
+        description: "Auth key to use inside ~/.npmrc"
+        type: string
+        required: false
+        default: "authToken"
+      auth-value:
+        description: "Auth value to use inside ~/.npmrc"
+        type: string
+        required: false
+        default: ${{ github.token }}
       disable-unit-test:
         description: "Disable unit testing job"
         type: string
@@ -50,6 +70,70 @@ on:
         default: 0
 
 jobs:
+  validate-version:
+    runs-on: ubuntu-latest
+    outputs:
+      package-name: ${{ steps.package.outputs.name }}
+      package-scope: ${{ steps.package.outputs.scope }}
+      package-version: ${{ steps.package.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract package data from package.json
+        id: package
+        run: |
+          PACKAGE_NAME=$(jq -r .name package.json)
+          echo "name=$PACKAGE_NAME" >> $GITHUB_OUTPUT
+          echo "version=$(jq -r .version package.json)" >> $GITHUB_OUTPUT
+          
+          if [[ $PACKAGE_NAME != @*/* ]]; then
+            echo "Error: Package name must be scoped (e.g., @scope/package-name)."
+            exit 1
+          fi
+          
+          PACKAGE_SCOPE=$(echo $PACKAGE_NAME | cut -d'/' -f1)
+          echo "scope=$PACKAGE_SCOPE" >> $GITHUB_OUTPUT
+
+      - name: Get published version from GitHub Package Registry
+        id: published
+        run: |
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ inputs.auth-value }}" > ~/.npmrc
+          echo "always-auth=true" >> ~/.npmrc
+          PUBLISHED_VERSION=$(npm view ${{ steps.package.outputs.name }} version --registry=${{ inputs.registry }} || echo "0.0.0")
+          echo "version=$PUBLISHED_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Install semver package
+        run: npm install semver
+
+      - name: Validate version
+        env:
+          PUBLISHED_VERSION: ${{ steps.published.outputs.version }}
+          PACKAGE_VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          node -e ' 
+            const semver = require("semver");
+            const current = process.env.PUBLISHED_VERSION || "0.0.0";
+            const next = process.env.PACKAGE_VERSION;
+            if (!semver.valid(next)) {
+              console.error("Error: package.json version is not a valid SemVer version.");
+              process.exit(1);
+            }
+            if (!semver.valid(current)) {
+              console.error("Error: published version is not a valid SemVer version.");
+              process.exit(1);
+            }
+            if (!semver.gt(next, current)) {
+              console.error(`Error: Version ${next} is not greater than published ${current}`);
+              process.exit(1);
+            }
+          '
+
   build:
     runs-on: ubuntu-latest
     steps:
@@ -73,13 +157,12 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nextjs-build
+          name: lib-build
           include-hidden-files: true
           retention-days: 2
           path: |
-            .next/standalone
-            .next/static
-            ./public
+            ./package.json
+            ./dist
 
   unit-test:
     name: Unit tests
@@ -104,7 +187,6 @@ jobs:
 
   integration-test:
     name: Integration tests
-
     needs: [build]
     runs-on: ubuntu-latest
     steps:
@@ -149,25 +231,29 @@ jobs:
           skip-dirs: node_modules,.git
           upload-sarif: ${{ inputs.gh-advanced-security }}
 
-  docker:
-    name: Docker build and push
-    needs: [unit-test,integration-test,code-quality,vulnerability-analysis]
+  publish:
+    name: Publish library
+    needs: [validate-version,unit-test,integration-test,code-quality,vulnerability-analysis]
+    if: ${{ github.ref_name == github.event.repository.default_branch }}
     runs-on: ubuntu-latest
     steps:
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
-          name: nextjs-build
+          name: lib-build
 
-      - name: Build and push (default branch only) Docker image
-        uses: phorus-group/docker-action@main
-        with:
-          dockerfile-path: "dockerfiles/Dockerfile.nextjs"
-          push: true
+      - name: Configure npm registry globally in ~/.npmrc
+        run: |
+          echo "${{ needs.validate-version.outputs.package-scope }}:registry=${{ inputs.registry }}" > ~/.npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ inputs.auth-value }}" >> ~/.npmrc
+          echo "always-auth=true" >> ~/.npmrc
+
+      - name: Publish package
+        run: yarn publish --non-interactive --access ${{ inputs.access }}
 
   enforce-all-checks:
     name: Enforce all checks
-    needs: [docker]
+    needs: [publish]
     if: ${{ github.ref_name != github.event.repository.default_branch }}
     runs-on: ubuntu-latest
     permissions:
@@ -176,5 +262,5 @@ jobs:
       - name: Enforce all checks
         uses: poseidon/wait-for-status-checks@main
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ github.token }}
           ignore_pattern: ".*Enforce all checks"
