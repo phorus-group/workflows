@@ -88,7 +88,7 @@ jobs:
       - name: Get published version from GitHub Package Registry
         id: published
         run: |
-          echo "//npm.pkg.github.com/:_authToken=${{ github.token }}" > ~/.npmrc
+          echo "//${{ inputs.registry }}/:_authToken=${{ github.token }}" > ~/.npmrc
           PUBLISHED_VERSION=$(npm view ${{ steps.package.outputs.name }} version --registry=${{ inputs.registry }} || echo "0.0.0")
           echo "version=$PUBLISHED_VERSION" >> $GITHUB_OUTPUT
 
@@ -233,7 +233,7 @@ jobs:
 
       - name: Configure npm registry globally in ~/.npmrc
         run: |
-          echo "//npm.pkg.github.com/:_authToken=${{ github.token }}" > ~/.npmrc
+          echo "//${{ inputs.registry }}/:_authToken=${{ github.token }}" > ~/.npmrc
           echo "${{ needs.validate-version.outputs.package-scope }}:registry=${{ inputs.registry }}" >> ~/.npmrc
 
       - name: Publish package
