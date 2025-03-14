@@ -132,17 +132,17 @@ jobs:
           # Extract rootProject.name from settings.gradle(.kts)
           PACKAGE_NAME=$(grep -E 'rootProject\.name\s*=\s*".+"' "$SETTINGS_FILE" | awk -F'"' '{print $2}' | head -n 1)
           
-          # Ensure values were extracted correctly
-          if [[ -z "$PACKAGE_GROUP" || -z "$PACKAGE_VERSION" || -z "$PACKAGE_NAME" ]]; then
-            echo "Error: Could not extract group, version, or rootProject.name."
-            exit 1
-          fi
-          
           # Output extracted values
           echo "Extracted values:"
           echo "Group: $PACKAGE_GROUP"
           echo "Version: $PACKAGE_VERSION"
           echo "Name: $PACKAGE_NAME"
+          
+          # Ensure values were extracted correctly
+          if [[ -z "$PACKAGE_GROUP" || -z "$PACKAGE_VERSION" || -z "$PACKAGE_NAME" ]]; then
+            echo "Error: Could not extract group, version, or rootProject.name."
+            exit 1
+          fi
           
           echo "group=$PACKAGE_GROUP" >> $GITHUB_ENV
           echo "version=$PACKAGE_VERSION" >> $GITHUB_ENV
