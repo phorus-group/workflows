@@ -115,6 +115,7 @@ jobs:
         id: package
         run: |
           # Detect build.gradle(.kts) file
+          ls -la
           if [[ -f "build.gradle.kts" ]]; then
             GRADLE_FILE="build.gradle.kts"
           elif [[ -f "build.gradle" ]]; then
@@ -257,7 +258,7 @@ jobs:
           artifact-suffix: integration
 
   merge-test-reports:
-    name: Integration tests
+    name: Merge test reports
     needs: [unit-test,integration-test]
     runs-on: ubuntu-latest
     steps:
