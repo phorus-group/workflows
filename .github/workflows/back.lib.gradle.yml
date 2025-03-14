@@ -125,6 +125,8 @@ jobs:
             exit 1
           fi
           
+          echo "Gradle file: GRADLE_FILE"
+          
           # Extract group and version from build.gradle(.kts)
           PACKAGE_GROUP=$(grep -E 'group\s*=\s*".+"' "$GRADLE_FILE" | awk -F'"' '{print $2}' | head -n 1)
           PACKAGE_VERSION=$(grep -E 'version\s*=\s*".+"' "$GRADLE_FILE" | awk -F'"' '{print $2}' | head -n 1)
@@ -133,7 +135,6 @@ jobs:
           PACKAGE_NAME=$(grep -E 'rootProject\.name\s*=\s*".+"' "$SETTINGS_FILE" | awk -F'"' '{print $2}' | head -n 1)
           
           # Output extracted values
-          echo "Extracted values:"
           echo "Group: $PACKAGE_GROUP"
           echo "Version: $PACKAGE_VERSION"
           echo "Name: $PACKAGE_NAME"
