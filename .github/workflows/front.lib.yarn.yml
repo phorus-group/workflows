@@ -115,20 +115,19 @@ jobs:
           npm install semver
 
       - name: Validate version
-        env:
-          PUBLISHED_VERSION: ${{ steps.published.outputs.version }}
-          PACKAGE_VERSION: ${{ steps.package.outputs.version }}
         run: |
+          export PUBLISHED_VERSION=${{ steps.published.outputs.version }}
+          export PACKAGE_VERSION=${{ steps.package.outputs.version }}
           node -e ' 
             const semver = require("semver");
             const current = process.env.PUBLISHED_VERSION || "0.0.0";
             const next = process.env.PACKAGE_VERSION;
             if (!semver.valid(next)) {
-              console.error("Error: package.json version is not a valid SemVer version.");
+              console.error(`Error: package version is not a valid SemVer version. Version: ${next}`);
               process.exit(1);
             }
             if (!semver.valid(current)) {
-              console.error("Error: published version is not a valid SemVer version.");
+              console.error(`Error: published version is not a valid SemVer version. Version: ${current}`);
               process.exit(1);
             }
             if (!semver.gt(next, current)) {
