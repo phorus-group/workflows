@@ -1,0 +1,341 @@
+name: Reusable library workflow to build and publish a gradle library
+
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        description: "Java version to use"
+        type: string
+        required: false
+        default: "21"
+      java-distribution:
+        description: "Java distribution to use"
+        type: string
+        required: false
+        default: "temurin"
+      gradle-version:
+        description: "Gradle version to use"
+        type: string
+        required: false
+        default: "8.5"
+      metadata-base-url:
+        description: "Base URL for Maven metadata (Sonatype, GitHub, JFrog, etc)"
+        type: string
+        required: false
+        default: "https://maven.pkg.github.com/${{ github.repository_owner }}/${{ github.event.repository.name }}"
+      registry:
+        description: "Registry to use"
+        type: string
+        required: false
+        default: "https://maven.pkg.github.com"
+      auth-key:
+        description: "Auth key to use inside ~/.npmrc"
+        type: string
+        required: false
+        default: "authToken"
+      auth-value:
+        description: "Auth value to use inside ~/.npmrc"
+        type: string
+        required: false
+        default: ${{ github.token }}
+      build-and-test:
+        description: "Build and test at the same time"
+        type: boolean
+        required: false
+        default: false
+      disable-unit-test:
+        description: "Disable unit testing job"
+        type: string
+        required: false
+        default: "false"
+      disable-integration-test:
+        description: "Disable integration testing job"
+        type: string
+        required: false
+        default: "false"
+      gh-advanced-security:
+        description: "Enable if you have GitHub Advanced Security"
+        type: boolean
+        required: false
+        default: false
+      code-quality-info-threshold:
+        description: "The number of findings of this severity allowed before the job returns a failure"
+        type: number
+        required: false
+        default: 10
+      code-quality-minor-threshold:
+        description: "The number of findings of this severity allowed before the job returns a failure"
+        type: number
+        required: false
+        default: 5
+      code-quality-major-threshold:
+        description: "The number of findings of this severity allowed before the job returns a failure"
+        type: number
+        required: false
+        default: 1
+      code-quality-critical-threshold:
+        description: "The number of findings of this severity allowed before the job returns a failure"
+        type: number
+        required: false
+        default: 0
+      code-quality-blocker-threshold:
+        description: "The number of findings of this severity allowed before the job returns a failure"
+        type: number
+        required: false
+        default: 0
+
+jobs:
+  validate-version:
+    runs-on: ubuntu-latest
+    outputs:
+      package-group: ${{ steps.package.outputs.group }}
+      package-name: ${{ steps.package.outputs.name }}
+      package-version: ${{ steps.package.outputs.version }}
+      published-version: ${{ steps.published.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract package data from Gradle build file
+        id: package
+        run: |
+          # Detect build.gradle(.kts) file
+          if [[ -f "build.gradle.kts" ]]; then
+            GRADLE_FILE="build.gradle.kts"
+          elif [[ -f "build.gradle" ]]; then
+            GRADLE_FILE="build.gradle"
+          else
+            echo "Error: No build.gradle(.kts) file found."
+            exit 1
+          fi
+          
+          # Extract group and version from build.gradle(.kts)
+          PACKAGE_GROUP=$(grep -E 'group\s*=\s*".+"' "$GRADLE_FILE" | awk -F'"' '{print $2}' | head -n 1)
+          PACKAGE_VERSION=$(grep -E 'version\s*=\s*".+"' "$GRADLE_FILE" | awk -F'"' '{print $2}' | head -n 1)
+          
+          # Extract rootProject.name from settings.gradle(.kts)
+          PACKAGE_NAME=$(grep -E 'rootProject\.name\s*=\s*".+"' "$SETTINGS_FILE" | awk -F'"' '{print $2}' | head -n 1)
+          
+          # Ensure values were extracted correctly
+          if [[ -z "$PACKAGE_GROUP" || -z "$PACKAGE_VERSION" || -z "$PACKAGE_NAME" ]]; then
+            echo "Error: Could not extract group, version, or rootProject.name."
+            exit 1
+          fi
+          
+          # Output extracted values
+          echo "Extracted values:"
+          echo "Group: $PACKAGE_GROUP"
+          echo "Version: $PACKAGE_VERSION"
+          echo "Name: $PACKAGE_NAME"
+          
+          echo "group=$PACKAGE_GROUP" >> $GITHUB_ENV
+          echo "version=$PACKAGE_VERSION" >> $GITHUB_ENV
+          echo "name=$PACKAGE_NAME" >> $GITHUB_ENV
+
+      - name: Get published version from registry
+        id: published
+        run: |
+          GROUP_PATH=$(echo "${{ steps.package.outputs.group }}" | tr '.' '/')
+          METADATA_URL="${{ inputs.metadata-base-url }}/${GROUP_PATH}/${{ steps.package.outputs.name }}/maven-metadata.xml"
+          
+          echo "Fetching metadata from: $METADATA_URL"
+
+          PUBLISHED_VERSION=$(curl -s "$METADATA_URL" | grep -oPm1 "<latest>[^<]+" | sed 's/<latest>//')
+  
+          if [[ -z "$PUBLISHED_VERSION" ]]; then
+            PUBLISHED_VERSION="0.0.0"
+          fi
+        
+          echo "Extracted published version: $PUBLISHED_VERSION"
+          echo "version=$PUBLISHED_VERSION" >> $GITHUB_OUTPUT 
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Install semver package
+        run: |
+          rm -f package.json package-lock.json yarn.lock
+          npm install semver
+
+      - name: Validate version
+        env:
+          PUBLISHED_VERSION: ${{ steps.published.outputs.version }}
+          PACKAGE_VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          node -e ' 
+            const semver = require("semver");
+            const current = process.env.PUBLISHED_VERSION || "0.0.0";
+            const next = process.env.PACKAGE_VERSION;
+            if (!semver.valid(next)) {
+              console.error("Error: package.json version is not a valid SemVer version.");
+              process.exit(1);
+            }
+            if (!semver.valid(current)) {
+              console.error("Error: published version is not a valid SemVer version.");
+              process.exit(1);
+            }
+            if (!semver.gt(next, current)) {
+              console.error(`Error: Version ${next} is not greater than published ${current}`);
+              process.exit(1);
+            }
+          '
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build
+        uses: phorus-group/gradle-build-action@main
+        with:
+          java-version: ${{ inputs.java-version }}
+          java-distribution: ${{ inputs.java-distribution }}
+          gradle-version: ${{ inputs.gradle-version }}
+          build-and-test: ${{ inputs.build-and-test }}
+
+  unit-test:
+    name: Unit tests
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        if: ${{ inputs.disable-unit-test != 'true' }}
+        uses: actions/checkout@v4
+
+      - name: Run unit-tests
+        if: ${{ inputs.disable-unit-test != 'true' }}
+        uses: phorus-group/gradle-test-action@main
+        with:
+          java-version: ${{ inputs.java-version }}
+          java-distribution: ${{ inputs.java-distribution }}
+          gradle-version: ${{ inputs.gradle-version }}
+          command: check unitTest -x test
+          artifact-suffix: unit
+
+  integration-test:
+    name: Integration tests
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        if: ${{ inputs.disable-integration-test != 'true' }}
+        uses: actions/checkout@v4
+
+      - name: Run unit-tests
+        if: ${{ inputs.disable-integration-test != 'true' }}
+        uses: phorus-group/gradle-test-action@main
+        with:
+          java-version: ${{ inputs.java-version }}
+          java-distribution: ${{ inputs.java-distribution }}
+          gradle-version: ${{ inputs.gradle-version }}
+          command: integrationTest
+          artifact-suffix: integration
+
+  merge-test-reports:
+    name: Integration tests
+    needs: [unit-test,integration-test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        if: ${{ inputs.disable-integration-test != 'true' && inputs.disable-unit-test != 'true' }}
+        uses: actions/checkout@v4
+
+      - name: Run unit-tests
+        if: ${{ inputs.disable-integration-test != 'true' && inputs.disable-unit-test != 'true' }}
+        uses: phorus-group/gradle-merge-reports-action@main
+        with:
+          java-version: ${{ inputs.java-version }}
+          java-distribution: ${{ inputs.java-distribution }}
+          gradle-version: ${{ inputs.gradle-version }}
+          command: jacocoMergeReports
+          test-artifact-1: gradle-tests-unit
+          test-artifact-2: gradle-tests-integration
+
+  code-quality:
+    name: Code quality check
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check code quality
+        uses: phorus-group/code-quality-action@main
+        with:
+          info-threshold: ${{ inputs.code-quality-info-threshold }}
+          minor-threshold: ${{ inputs.code-quality-minor-threshold }}
+          major-threshold: ${{ inputs.code-quality-major-threshold }}
+          critical-threshold: ${{ inputs.code-quality-critical-threshold }}
+          blocker-threshold: ${{ inputs.code-quality-blocker-threshold }}
+
+  vulnerability-analysis:
+    name: Vulnerability analysis
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: gradle-build
+
+      - name: "Setup Java"
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ inputs.java-distribution }}
+          java-version: ${{ inputs.java-version }}
+
+      - name: "Setup Gradle"
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ inputs.gradle-version }}
+
+      - name: "Generate gradle lockfile"
+        run: |
+          echo "allprojects { dependencyLocking { lockAllConfigurations() } }" >> ~/.gradle/init.gradle
+          ./gradlew dependencies --write-locks
+
+      - name: Analyse project for vulnerabilities
+        uses: phorus-group/vulnerability-analysis-action@main
+        with:
+          skip-dirs: .git
+          upload-sarif: ${{ inputs.gh-advanced-security }}
+
+#  publish:
+#    name: Publish library
+#    needs: [validate-version,unit-test,integration-test,code-quality,vulnerability-analysis]
+#    if: ${{ github.ref_name == github.event.repository.default_branch }}
+#    runs-on: ubuntu-latest
+#    steps:
+#      - name: Download build artifacts
+#        uses: actions/download-artifact@v4
+#        with:
+#          name: lib-build
+#
+#      - name: Configure npm registry globally in ~/.npmrc
+#        run: |
+#          echo "${{ needs.validate-version.outputs.package-scope }}:registry=${{ inputs.registry }}" > ~/.npmrc
+#          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ inputs.auth-value }}" >> ~/.npmrc
+#          echo "always-auth=true" >> ~/.npmrc
+#
+#      - name: Publish package
+#        run: yarn publish --non-interactive --access ${{ inputs.access }}
+
+  enforce-all-checks:
+    name: Enforce all checks
+    needs: [validate-version,unit-test,integration-test,code-quality,vulnerability-analysis]
+    if: ${{ github.ref_name != github.event.repository.default_branch }}
+    runs-on: ubuntu-latest
+    permissions:
+      checks: read
+    steps:
+      - name: Enforce all checks
+        uses: poseidon/wait-for-status-checks@main
+        with:
+          token: ${{ github.token }}
+          ignore_pattern: ".*Enforce all checks"

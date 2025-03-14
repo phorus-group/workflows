@@ -1,4 +1,4 @@
-name: Reusable library workflow to build and publish a library
+name: Reusable library workflow to build and publish a yarn library
 
 on:
   workflow_call:
@@ -76,6 +76,7 @@ jobs:
       package-name: ${{ steps.package.outputs.name }}
       package-scope: ${{ steps.package.outputs.scope }}
       package-version: ${{ steps.package.outputs.version }}
+      published-version: ${{ steps.published.outputs.version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
