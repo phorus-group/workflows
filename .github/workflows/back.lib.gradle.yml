@@ -136,7 +136,7 @@ jobs:
             exit 1
           fi
           
-          echo "Gradle file: GRADLE_FILE"
+          echo "Gradle file: $GRADLE_FILE"
           
           # Extract group and version from build.gradle(.kts)
           PACKAGE_GROUP=$(grep -E 'group\s*=\s*".+"' "$GRADLE_FILE" | awk -F'"' '{print $2}' | head -n 1)
@@ -156,9 +156,9 @@ jobs:
             exit 1
           fi
           
-          echo "group=$PACKAGE_GROUP" >> $GITHUB_ENV
-          echo "version=$PACKAGE_VERSION" >> $GITHUB_ENV
-          echo "name=$PACKAGE_NAME" >> $GITHUB_ENV
+          echo "group=$PACKAGE_GROUP" >> $GITHUB_OUTPUT
+          echo "version=$PACKAGE_VERSION" >> $GITHUB_OUTPUT
+          echo "name=$PACKAGE_NAME" >> $GITHUB_OUTPUT
 
       - name: Get published version from registry
         id: published
