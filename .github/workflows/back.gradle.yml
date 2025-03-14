@@ -18,41 +18,6 @@ on:
         type: string
         required: false
         default: "8.5"
-      metadata-base-url:
-        description: "Base URL for Maven metadata (Sonatype, GitHub, JFrog, etc)"
-        type: string
-        required: false
-        default: "https://maven.pkg.github.com/${{ github.repository_owner }}/${{ github.event.repository.name }}"
-      metadata-auth-method:
-        description: "The auth method used to access the registry for metadata. header / basic / none"
-        type: string
-        required: false
-        default: "header"
-      metadata-auth-key:
-        description: "The metadata auth key. Used as the header key (in auth-method: header) or as the username (in auth-method: basic)"
-        type: string
-        required: false
-        default: "Authorization"
-      metadata-auth-value:
-        description: "The metadata auth value. Used as the header value (in auth-method: header) or as the password (in auth-method: basic)"
-        type: string
-        required: false
-        default: "Bearer ${{ github.token }}"
-      registry:
-        description: "Registry to use"
-        type: string
-        required: false
-        default: "https://maven.pkg.github.com"
-      auth-key:
-        description: "Auth key to use inside ~/.npmrc"
-        type: string
-        required: false
-        default: "authToken"
-      auth-value:
-        description: "Auth value to use inside ~/.npmrc"
-        type: string
-        required: false
-        default: ${{ github.token }}
       build-and-test:
         description: "Build and test at the same time"
         type: boolean
