@@ -115,6 +115,7 @@ jobs:
         id: package
         run: |
           # Detect build.gradle(.kts) file
+          ls -la
           if [[ -f "build.gradle.kts" ]]; then
             GRADLE_FILE="build.gradle.kts"
           elif [[ -f "build.gradle" ]]; then
