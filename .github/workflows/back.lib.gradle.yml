@@ -125,6 +125,17 @@ jobs:
             exit 1
           fi
           
+          # Detect settings.gradle(.kts) file
+          ls -la
+          if [[ -f "settings.gradle.kts" ]]; then
+            SETTINGS_FILE="settings.gradle.kts"
+          elif [[ -f "settings.gradle" ]]; then
+            SETTINGS_FILE="settings.gradle"
+          else
+            echo "Error: No settings.gradle(.kts) file found."
+            exit 1
+          fi
+          
           echo "Gradle file: GRADLE_FILE"
           
           # Extract group and version from build.gradle(.kts)
