@@ -23,6 +23,21 @@ on:
         type: string
         required: false
         default: "https://maven.pkg.github.com/${{ github.repository_owner }}/${{ github.event.repository.name }}"
+      metadata-auth-method:
+        description: "The auth method used to access the registry for metadata. header / basic / none"
+        type: string
+        required: false
+        default: "header"
+      metadata-auth-key:
+        description: "The metadata auth key. Used as the header key (in auth-method: header) or as the username (in auth-method: basic)"
+        type: string
+        required: false
+        default: "Authorization"
+      metadata-auth-value:
+        description: "The metadata auth value. Used as the header value (in auth-method: header) or as the password (in auth-method: basic)"
+        type: string
+        required: false
+        default: "Bearer ${{ github.token }}"
       registry:
         description: "Registry to use"
         type: string
@@ -140,7 +155,14 @@ jobs:
           
           echo "Fetching metadata from: $METADATA_URL"
 
-          PUBLISHED_VERSION=$(curl -s "$METADATA_URL" | grep -oPm1 "<latest>[^<]+" | sed 's/<latest>//')
+          if [[ "${{ inputs.metadata-auth-method }}" == "basic" ]]; then
+            PUBLISHED_VERSION=$(curl -u "${{ inputs.metadata-auth-key }}:${{ inputs.metadata-auth-value }}" -s "$METADATA_URL" | grep -oPm1 "<latest>[^<]+" | sed 's/<latest>//')
+          elif [[ "${{ inputs.metadata-auth-method }}" == "header" ]]; then
+            PUBLISHED_VERSION=$(curl -H "${{ inputs.metadata-auth-key }}: ${{ inputs.metadata-auth-value }}" -s "$METADATA_URL" | grep -oPm1 "<latest>[^<]+" | sed 's/<latest>//')
+          else
+            PUBLISHED_VERSION=$(curl -s "$METADATA_URL" | grep -oPm1 "<latest>[^<]+" | sed 's/<latest>//')
+          fi
+          
   
           if [[ -z "$PUBLISHED_VERSION" ]]; then
             PUBLISHED_VERSION="0.0.0"
