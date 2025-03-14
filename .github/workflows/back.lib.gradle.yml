@@ -257,7 +257,7 @@ jobs:
           artifact-suffix: integration
 
   merge-test-reports:
-    name: Integration tests
+    name: Merge test reports
     needs: [unit-test,integration-test]
     runs-on: ubuntu-latest
     steps:
