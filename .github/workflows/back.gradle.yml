@@ -100,122 +100,6 @@ on:
         default: 0
 
 jobs:
-  validate-version:
-    runs-on: ubuntu-latest
-    outputs:
-      package-group: ${{ steps.package.outputs.group }}
-      package-name: ${{ steps.package.outputs.name }}
-      package-version: ${{ steps.package.outputs.version }}
-      published-version: ${{ steps.published.outputs.version }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Extract package data from Gradle build file
-        id: package
-        run: |
-          # Detect build.gradle(.kts) file
-          ls -la
-          if [[ -f "build.gradle.kts" ]]; then
-            GRADLE_FILE="build.gradle.kts"
-          elif [[ -f "build.gradle" ]]; then
-            GRADLE_FILE="build.gradle"
-          else
-            echo "Error: No build.gradle(.kts) file found."
-            exit 1
-          fi
-          
-          # Detect settings.gradle(.kts) file
-          ls -la
-          if [[ -f "settings.gradle.kts" ]]; then
-            SETTINGS_FILE="settings.gradle.kts"
-          elif [[ -f "settings.gradle" ]]; then
-            SETTINGS_FILE="settings.gradle"
-          else
-            echo "Error: No settings.gradle(.kts) file found."
-            exit 1
-          fi
-          
-          echo "Gradle file: $GRADLE_FILE"
-          
-          # Extract group and version from build.gradle(.kts)
-          PACKAGE_GROUP=$(grep -E 'group\s*=\s*".+"' "$GRADLE_FILE" | awk -F'"' '{print $2}' | head -n 1)
-          PACKAGE_VERSION=$(grep -E 'version\s*=\s*".+"' "$GRADLE_FILE" | awk -F'"' '{print $2}' | head -n 1)
-          
-          # Extract rootProject.name from settings.gradle(.kts)
-          PACKAGE_NAME=$(grep -E 'rootProject\.name\s*=\s*".+"' "$SETTINGS_FILE" | awk -F'"' '{print $2}' | head -n 1)
-          
-          # Output extracted values
-          echo "Group: $PACKAGE_GROUP"
-          echo "Version: $PACKAGE_VERSION"
-          echo "Name: $PACKAGE_NAME"
-          
-          # Ensure values were extracted correctly
-          if [[ -z "$PACKAGE_GROUP" || -z "$PACKAGE_VERSION" || -z "$PACKAGE_NAME" ]]; then
-            echo "Error: Could not extract group, version, or rootProject.name."
-            exit 1
-          fi
-          
-          echo "group=$PACKAGE_GROUP" >> $GITHUB_OUTPUT
-          echo "version=$PACKAGE_VERSION" >> $GITHUB_OUTPUT
-          echo "name=$PACKAGE_NAME" >> $GITHUB_OUTPUT
-
-      - name: Get published version from registry
-        id: published
-        run: |
-          GROUP_PATH=$(echo "${{ steps.package.outputs.group }}" | tr '.' '/')
-          METADATA_URL="${{ inputs.metadata-base-url }}/${GROUP_PATH}/${{ steps.package.outputs.name }}/maven-metadata.xml"
-          
-          echo "Fetching metadata from: $METADATA_URL"
-
-          if [[ "${{ inputs.metadata-auth-method }}" == "basic" ]]; then
-            PUBLISHED_VERSION=$(curl -u "${{ inputs.metadata-auth-key }}:${{ inputs.metadata-auth-value }}" -s "$METADATA_URL" | grep -oPm1 "<latest>[^<]+" | sed 's/<latest>//')
-          elif [[ "${{ inputs.metadata-auth-method }}" == "header" ]]; then
-            PUBLISHED_VERSION=$(curl -H "${{ inputs.metadata-auth-key }}: ${{ inputs.metadata-auth-value }}" -s "$METADATA_URL" | grep -oPm1 "<latest>[^<]+" | sed 's/<latest>//')
-          else
-            PUBLISHED_VERSION=$(curl -s "$METADATA_URL" | grep -oPm1 "<latest>[^<]+" | sed 's/<latest>//')
-          fi
-          
-  
-          if [[ -z "$PUBLISHED_VERSION" ]]; then
-            PUBLISHED_VERSION="0.0.0"
-          fi
-        
-          echo "Extracted published version: $PUBLISHED_VERSION"
-          echo "version=$PUBLISHED_VERSION" >> $GITHUB_OUTPUT 
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ inputs.node-version }}
-
-      - name: Install semver package
-        run: |
-          rm -f package.json package-lock.json yarn.lock
-          npm install semver
-
-      - name: Validate version
-        run: |
-          export PUBLISHED_VERSION=${{ steps.published.outputs.version }}
-          export PACKAGE_VERSION=${{ steps.package.outputs.version }}
-          node -e ' 
-            const semver = require("semver");
-            const current = process.env.PUBLISHED_VERSION || "0.0.0";
-            const next = process.env.PACKAGE_VERSION;
-            if (!semver.valid(next)) {
-              console.error(`Error: package version is not a valid SemVer version. Version: ${next}`);
-              process.exit(1);
-            }
-            if (!semver.valid(current)) {
-              console.error(`Error: published version is not a valid SemVer version. Version: ${current}`);
-              process.exit(1);
-            }
-            if (!semver.gt(next, current)) {
-              console.error(`Error: Version ${next} is not greater than published ${current}`);
-              process.exit(1);
-            }
-          '
-
   build:
     runs-on: ubuntu-latest
     steps:
@@ -340,10 +224,9 @@ jobs:
           skip-dirs: .git
           upload-sarif: ${{ inputs.gh-advanced-security }}
 
-  publish:
-    name: Publish library
-    needs: [validate-version,unit-test,integration-test,code-quality,vulnerability-analysis]
-    if: ${{ github.ref_name == github.event.repository.default_branch }}
+  docker:
+    name: Docker build and push
+    needs: [unit-test,integration-test,code-quality,vulnerability-analysis]
     runs-on: ubuntu-latest
     steps:
       - name: Download build artifacts
@@ -351,14 +234,11 @@ jobs:
         with:
           name: gradle-build
 
-      - name: Configure npm registry globally in ~/.npmrc
-        run: |
-          echo "${{ needs.validate-version.outputs.package-scope }}:registry=${{ inputs.registry }}" > ~/.npmrc
-          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ inputs.auth-value }}" >> ~/.npmrc
-          echo "always-auth=true" >> ~/.npmrc
-
-      - name: Publish package
-        run: yarn publish --non-interactive --access ${{ inputs.access }}
+      - name: Build and push Docker image
+        uses: phorus-group/docker-action@main
+        with:
+          dockerfile-path: "dockerfiles/Dockerfile.gradle"
+          push: true
 
   enforce-all-checks:
     name: Enforce all checks

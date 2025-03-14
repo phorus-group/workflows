@@ -159,7 +159,7 @@ jobs:
         with:
           name: nextjs-build
 
-      - name: Build and push (default branch only) Docker image
+      - name: Build and push Docker image
         uses: phorus-group/docker-action@main
         with:
           dockerfile-path: "dockerfiles/Dockerfile.nextjs"
