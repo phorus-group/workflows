@@ -1,4 +1,4 @@
-name: Reusable library workflow to build and publish a gradle library
+name: Reusable gradle workflow to build and deployment  
 
 on:
   workflow_call:
