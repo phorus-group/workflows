@@ -259,7 +259,10 @@ jobs:
           echo "always-auth=true" >> ~/.npmrc
 
       - name: Publish package
-        run: yarn publish --new-version $(jq -r .version package.json) --non-interactive --access ${{ inputs.access }}
+        run: |
+          # Delete the prepare script since it could be running things not compatible with this step, like husky
+          npm pkg delete scripts.prepare
+          yarn publish --new-version $(jq -r .version package.json) --non-interactive --access ${{ inputs.access }}
 
   enforce-all-checks:
     name: Enforce all checks
