@@ -95,7 +95,6 @@ jobs:
         with:
           java-version: ${{ inputs.java-version }}
           java-distribution: ${{ inputs.java-distribution }}
-          gradle-version: 8.5
           commands: check unitTest -x test
           artifact-suffix: unit
 
@@ -114,7 +113,6 @@ jobs:
         with:
           java-version: ${{ inputs.java-version }}
           java-distribution: ${{ inputs.java-distribution }}
-          gradle-version: 8.5
           commands: integrationTest
           artifact-suffix: integration
 
@@ -134,7 +132,6 @@ jobs:
         with:
           java-version: ${{ inputs.java-version }}
           java-distribution: ${{ inputs.java-distribution }}
-          gradle-version: 8.5
           command: jacocoMergeReports
           test-artifact-1: gradle-tests-unit
           test-artifact-2: gradle-tests-integration
