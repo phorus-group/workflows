@@ -37,7 +37,7 @@ on:
         description: "Disable merging the test reports"
         type: string
         required: false
-        default: "false"
+        default: "true" # https://github.com/kageiit/gradle-jacobo-plugin cobertura report also has this issue: https://github.com/python/mypy/issues/17689, disabling for now
       gh-advanced-security:
         description: "Enable if you have GitHub Advanced Security"
         type: boolean
