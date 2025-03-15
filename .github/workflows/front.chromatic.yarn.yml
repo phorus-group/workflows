@@ -19,7 +19,8 @@ on:
         default: "authToken"
     secrets:
       token:
-        required: true
+        description: "Chromatic project token. Defaults to secrets.CHROMATIC_PROJECT_TOKEN"
+        required: false
       auth-value:
         description: "Auth value to use inside ~/.npmrc. Defaults to secrets.PACKAGES_READ" # Remember that the github.token only has access to the current repo packages
         required: false
