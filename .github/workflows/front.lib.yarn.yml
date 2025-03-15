@@ -19,12 +19,12 @@ on:
         required: false
         default: "private"
       auth-key:
-        description: "Auth key to use inside .npmrc"
+        description: "Auth key to use inside ~/.npmrc"
         type: string
         required: false
         default: "authToken"
       auth-value:
-        description: "Auth value to use inside .npmrc. Defaults to github.token"
+        description: "Auth value to use inside ~/.npmrc. Defaults to github.token"
         type: string
         required: false
       disable-unit-test:
@@ -101,8 +101,8 @@ jobs:
         env:
           AUTH_VALUE: ${{ inputs.auth-value || github.token }}
         run: |
-          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=$AUTH_VALUE" >> .npmrc
-          echo "always-auth=true" >> .npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=$AUTH_VALUE" >> ~/.npmrc
+          echo "always-auth=true" >> ~/.npmrc
           PUBLISHED_VERSION=$(npm view ${{ steps.package.outputs.name }} version --registry=https://${{ inputs.registry }} || echo "0.0.0")
           echo "version=$PUBLISHED_VERSION" >> $GITHUB_OUTPUT
 
@@ -250,21 +250,13 @@ jobs:
           name: lib-build
 
         #Github doesn't support using the github.token as an input default in reusable workflow, but it works in custom actions, weird stuff
-      - name: Configure npm registry globally in .npmrc
+      - name: Configure npm registry globally in ~/.npmrc
         env:
           AUTH_VALUE: ${{ inputs.auth-value || github.token }}
         run: |
-          echo "${{ needs.validate-version.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> .npmrc
-          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=$AUTH_VALUE" >> .npmrc
-          echo "always-auth=true" >> .npmrc
-          echo "auth value: ${{ inputs.auth-value }}"
-          echo "token value: ${{ github.token }}"
-          echo "npmrc content:"
-          cat .npmrc
-          npm config list
-
-      - name: Verify npm authentication
-        run: npm whoami || echo "Authentication failed"
+          echo "${{ needs.validate-version.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=$AUTH_VALUE" >> ~/.npmrc
+          echo "always-auth=true" >> ~/.npmrc
 
       - name: Publish package
         run: yarn publish --new-version $(jq -r .version package.json) --non-interactive --access ${{ inputs.access }}
