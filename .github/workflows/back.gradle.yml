@@ -201,6 +201,7 @@ jobs:
 
       - name: "Check build folder"
         run: |
+          ls -la
           ls -la build
           ls -la build/libs
 
