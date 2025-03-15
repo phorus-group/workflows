@@ -14,10 +14,10 @@ on:
         required: false
         default: "npm.pkg.github.com"
       access:
-        description: "Package access. public / private"
+        description: "Package access. public / restricted"
         type: string
         required: false
-        default: "private"
+        default: "restricted"
       auth-key:
         description: "Auth key to use inside ~/.npmrc"
         type: string
