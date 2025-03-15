@@ -252,6 +252,8 @@ jobs:
           echo "${{ needs.validate-version.outputs.package-scope }}:registry=${{ inputs.registry }}" > ~/.npmrc
           echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ inputs.auth-value }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
+          echo "npmrc content:"
+          cat ~/.npmrc
 
       - name: Publish package
         run: yarn publish --new-version $(jq -r .version package.json) --non-interactive --access ${{ inputs.access }}
