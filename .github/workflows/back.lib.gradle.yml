@@ -1,5 +1,7 @@
 name: Reusable library workflow to build and publish a gradle library
 
+# WIP - We need to make it work with private registries
+
 on:
   workflow_call:
     inputs:

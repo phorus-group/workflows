@@ -1,5 +1,7 @@
 name: Reusable gradle workflow to build and publish a docker image to GHCR
 
+# WIP - We need to make it work with private registries
+
 on:
   workflow_call:
     inputs:
@@ -13,11 +15,6 @@ on:
         type: string
         required: false
         default: "temurin"
-      gradle-version:
-        description: "Gradle version to use"
-        type: string
-        required: false
-        default: "8.5"
       build-and-test:
         description: "Build and test at the same time"
         type: boolean
@@ -81,7 +78,6 @@ jobs:
         with:
           java-version: ${{ inputs.java-version }}
           java-distribution: ${{ inputs.java-distribution }}
-          gradle-version: ${{ inputs.gradle-version }}
           build-and-test: ${{ inputs.build-and-test }}
 
   unit-test:
@@ -99,7 +95,7 @@ jobs:
         with:
           java-version: ${{ inputs.java-version }}
           java-distribution: ${{ inputs.java-distribution }}
-          gradle-version: ${{ inputs.gradle-version }}
+          gradle-version: 8.5
           commands: check unitTest -x test
           artifact-suffix: unit
 
@@ -118,7 +114,7 @@ jobs:
         with:
           java-version: ${{ inputs.java-version }}
           java-distribution: ${{ inputs.java-distribution }}
-          gradle-version: ${{ inputs.gradle-version }}
+          gradle-version: 8.5
           commands: integrationTest
           artifact-suffix: integration
 
@@ -138,7 +134,7 @@ jobs:
         with:
           java-version: ${{ inputs.java-version }}
           java-distribution: ${{ inputs.java-distribution }}
-          gradle-version: ${{ inputs.gradle-version }}
+          gradle-version: 8.5
           command: jacocoMergeReports
           test-artifact-1: gradle-tests-unit
           test-artifact-2: gradle-tests-integration
@@ -178,11 +174,6 @@ jobs:
         with:
           distribution: ${{ inputs.java-distribution }}
           java-version: ${{ inputs.java-version }}
-
-      - name: "Setup Gradle"
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: ${{ inputs.gradle-version }}
 
       - name: "Generate gradle lockfile"
         run: |
