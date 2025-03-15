@@ -101,7 +101,7 @@ jobs:
       - name: Get published version from GitHub Package Registry
         id: published
         run: |
-          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ secrets.read-auth-value || secrets.PACKAGES_READ }}" >> ~/.npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ secrets.pub-auth-value || github.token }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
           PUBLISHED_VERSION=$(npm view ${{ steps.package.outputs.name }} version --registry=https://${{ inputs.registry }} || echo "0.0.0")
           echo "version=$PUBLISHED_VERSION" >> $GITHUB_OUTPUT
@@ -150,6 +150,7 @@ jobs:
           node-version: ${{ inputs.node-version }}
 
       - name: Configure npm registry globally in ~/.npmrc to download dependencies from the same scope as the project
+        if: ${{ (secrets.read-auth-value || secrets.PACKAGES_READ) != '' }}
         run: |
           echo "${{ needs.validate-version.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
           echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ secrets.read-auth-value || secrets.PACKAGES_READ }}" >> ~/.npmrc
@@ -184,6 +185,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure npm registry globally in ~/.npmrc to download dependencies from the same scope as the project
+        if: ${{ (secrets.read-auth-value || secrets.PACKAGES_READ) != '' }}
         run: |
           echo "${{ needs.validate-version.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
           echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ secrets.read-auth-value || secrets.PACKAGES_READ }}" >> ~/.npmrc
@@ -211,6 +213,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure npm registry globally in ~/.npmrc to download dependencies from the same scope as the project
+        if: ${{ (secrets.read-auth-value || secrets.PACKAGES_READ) != '' }}
         run: |
           echo "${{ needs.validate-version.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
           echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ secrets.read-auth-value || secrets.PACKAGES_READ }}" >> ~/.npmrc
