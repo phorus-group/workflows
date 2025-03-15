@@ -18,7 +18,7 @@ on:
         required: false
         default: "authToken"
       auth-value:
-        description: "Auth value to use inside ~/.npmrc. Defaults to github.token"
+        description: "Auth value to use inside ~/.npmrc. Defaults to secret.PACKAGES_READ" # Remember that the github.token only has access to the current repo packages
         type: string
         required: false
     secrets:
@@ -46,7 +46,7 @@ jobs:
         if: ${{ inputs.registry-scope != '' }}
         run: |
           echo "${{ inputs.registry-scope }}:registry=https://${{ inputs.private-registry }}" >> ~/.npmrc
-          echo "//${{ inputs.private-registry }}/:_${{ inputs.auth-key }}=${{ inputs.auth-value || github.token }}" >> ~/.npmrc
+          echo "//${{ inputs.private-registry }}/:_${{ inputs.auth-key }}=${{ inputs.auth-value || secret.PACKAGES_READ }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
           rm -rf yarn.lock
 

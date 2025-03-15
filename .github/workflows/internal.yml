@@ -14,5 +14,5 @@ jobs:
       - name: Enforce all checks
         uses: poseidon/wait-for-status-checks@main
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ github.token }}
           ignore: Enforce all checks

@@ -23,7 +23,7 @@ on:
         required: false
         default: "authToken"
       auth-value:
-        description: "Auth value to use inside ~/.npmrc. Defaults to github.token"
+        description: "Auth value to use inside ~/.npmrc. Defaults to secret.PACKAGES_READ" # Remember that the github.token only has access to the current repo packages
         type: string
         required: false
       disable-unit-test:
@@ -81,11 +81,9 @@ jobs:
 
       - name: Configure npm registry globally in ~/.npmrc
         if: ${{ inputs.registry-scope != '' }}
-        env:
-          AUTH_VALUE: ${{ inputs.auth-value || github.token }}
         run: |
           echo "${{ inputs.registry-scope }}:registry=https://${{ inputs.private-registry }}" >> ~/.npmrc
-          echo "//${{ inputs.private-registry }}/:_${{ inputs.auth-key }}=$AUTH_VALUE" >> ~/.npmrc
+          echo "//${{ inputs.private-registry }}/:_${{ inputs.auth-key }}=${{ inputs.auth-value || secret.PACKAGES_READ }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
 
       - name: Install dependencies
@@ -119,11 +117,9 @@ jobs:
 
       - name: Configure npm registry globally in ~/.npmrc
         if: ${{ inputs.registry-scope != '' }}
-        env:
-          AUTH_VALUE: ${{ inputs.auth-value || github.token }}
         run: |
           echo "${{ inputs.registry-scope }}:registry=https://${{ inputs.private-registry }}" >> ~/.npmrc
-          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=$AUTH_VALUE" >> ~/.npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ inputs.auth-value || secret.PACKAGES_READ }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
 
       - name: Run unit-tests
@@ -150,11 +146,9 @@ jobs:
 
       - name: Configure npm registry globally in ~/.npmrc
         if: ${{ inputs.registry-scope != '' }}
-        env:
-          AUTH_VALUE: ${{ inputs.auth-value || github.token }}
         run: |
           echo "${{ inputs.registry-scope }}:registry=https://${{ inputs.private-registry }}" >> ~/.npmrc
-          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=$AUTH_VALUE" >> ~/.npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ inputs.auth-value || secret.PACKAGES_READ }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
 
       - name: Run integration-tests
@@ -221,5 +215,5 @@ jobs:
       - name: Enforce all checks
         uses: poseidon/wait-for-status-checks@main
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ github.token }}
           ignore_pattern: ".*Enforce all checks"
