@@ -246,7 +246,7 @@ jobs:
           java-version: ${{ inputs.java-version }}
           java-distribution: ${{ inputs.java-distribution }}
           gradle-version: ${{ inputs.gradle-version }}
-          command: check unitTest -x test
+          commandsg: check unitTest -x test
           artifact-suffix: unit
 
   integration-test:
@@ -258,14 +258,14 @@ jobs:
         if: ${{ inputs.disable-integration-test != 'true' }}
         uses: actions/checkout@v4
 
-      - name: Run unit-tests
+      - name: Run integration-tests
         if: ${{ inputs.disable-integration-test != 'true' }}
         uses: phorus-group/gradle-test-action@main
         with:
           java-version: ${{ inputs.java-version }}
           java-distribution: ${{ inputs.java-distribution }}
           gradle-version: ${{ inputs.gradle-version }}
-          command: integrationTest
+          commands: integrationTest
           artifact-suffix: integration
 
   merge-test-reports:
