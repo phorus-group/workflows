@@ -152,18 +152,8 @@ jobs:
       - name: Configure npm registry globally in ~/.npmrc to download dependencies from the same scope as the project
         env:
           AUTH_VALUE: ${{ secrets.read-auth-value || secrets.PACKAGES_READ }}
+        if: ${{ env.AUTH_VALUE != '' }}
         run: |
-          echo $AUTH_VALUE
-          if [[ -n "$AUTH_VALUE" ]]; then
-            echo "AUTH_VALUE is defined and not empty"
-          else
-            echo "AUTH_VALUE is either undefined or empty"
-          fi
-          if [[ -n "${{ secrets.read-auth-value || secrets.PACKAGES_READ }}" ]]; then
-            echo "secret is defined and not empty"
-          else
-            echo "secret is either undefined or empty"
-          fi
           echo "${{ needs.validate-version.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
           echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ secrets.read-auth-value || secrets.PACKAGES_READ }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
