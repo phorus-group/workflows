@@ -27,6 +27,7 @@ on:
         description: "Auth value to use inside ~/.npmrc. Defaults to github.token"
         type: string
         required: false
+        default: ${{ github.token }}
       disable-unit-test:
         description: "Disable unit testing job"
         type: string
@@ -255,7 +256,7 @@ jobs:
           AUTH_VALUE: ${{ inputs.auth-value || github.token }}
         run: |
           echo "${{ needs.validate-version.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
-          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=$AUTH_VALUE" >> ~/.npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=$${{ inputs.auth-value }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
 
       - name: Publish package
