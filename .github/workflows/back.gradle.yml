@@ -33,6 +33,11 @@ on:
         type: string
         required: false
         default: "false"
+      disable-merge-test-reports:
+        description: "Disable merging the test reports"
+        type: string
+        required: false
+        default: "false"
       gh-advanced-security:
         description: "Enable if you have GitHub Advanced Security"
         type: boolean
@@ -119,6 +124,7 @@ jobs:
 
   merge-test-reports:
     name: Merge test reports
+    if: ${{ inputs.disable-merge-test-reports != 'true' }}
     needs: [unit-test,integration-test]
     runs-on: ubuntu-latest
     steps:
