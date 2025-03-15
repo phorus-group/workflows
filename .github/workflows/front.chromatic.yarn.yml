@@ -41,11 +41,9 @@ jobs:
 
       - name: Configure npm registry globally in ~/.npmrc
         if: ${{ inputs.registry-scope != '' }}
-        env:
-          AUTH_VALUE: ${{ inputs.auth-value || github.token }}
         run: |
           echo "${{ inputs.registry-scope }}:registry=https://${{ inputs.private-registry }}" >> ~/.npmrc
-          echo "//${{ inputs.private-registry }}/:_${{ inputs.auth-key }}=$AUTH_VALUE" >> ~/.npmrc
+          echo "//${{ inputs.private-registry }}/:_${{ inputs.auth-key }}=${{ inputs.auth-value || github.token }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
 
       - name: Install dependencies
