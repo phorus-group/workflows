@@ -199,6 +199,11 @@ jobs:
         with:
           name: gradle-build
 
+      - name: "Check build folder"
+        run: |
+          ls -la build
+          ls -la build/libs
+
       - name: Build and push Docker image
         uses: phorus-group/docker-action@main
         with:
