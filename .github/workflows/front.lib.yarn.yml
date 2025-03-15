@@ -24,10 +24,9 @@ on:
         required: false
         default: "authToken"
       auth-value:
-        description: "Auth value to use inside ~/.npmrc"
+        description: "Auth value to use inside ~/.npmrc. Defaults to github.token"
         type: string
         required: false
-        default: "${{ github.token }}"
       disable-unit-test:
         description: "Disable unit testing job"
         type: string
@@ -98,8 +97,10 @@ jobs:
 
       - name: Get published version from GitHub Package Registry
         id: published
+        env:
+          AUTH_VALUE: ${{ inputs.auth-value || github.token }}
         run: |
-          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ inputs.auth-value }}" > ~/.npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=$AUTH_VALUE" > ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
           PUBLISHED_VERSION=$(npm view ${{ steps.package.outputs.name }} version --registry=${{ inputs.registry }} || echo "0.0.0")
           echo "version=$PUBLISHED_VERSION" >> $GITHUB_OUTPUT
@@ -248,9 +249,11 @@ jobs:
           name: lib-build
 
       - name: Configure npm registry globally in ~/.npmrc
+        env:
+          AUTH_VALUE: ${{ inputs.auth-value || github.token }}
         run: |
           echo "${{ needs.validate-version.outputs.package-scope }}:registry=${{ inputs.registry }}" > ~/.npmrc
-          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ inputs.auth-value }}" >> ~/.npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=$AUTH_VALUE" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
           echo "auth value: ${{ inputs.auth-value }}"
           echo "token value: ${{ github.token }}"
