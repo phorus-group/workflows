@@ -1,4 +1,4 @@
-name: Reusable gradle workflow to build and deployment  
+name: Reusable gradle workflow to build and publish a docker image to GHCR
 
 on:
   workflow_call:
