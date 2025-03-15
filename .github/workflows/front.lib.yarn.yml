@@ -27,7 +27,7 @@ on:
         description: "Auth value to use inside ~/.npmrc"
         type: string
         required: false
-        default: ${{ github.token }}
+        default: "${{ github.token }}"
       disable-unit-test:
         description: "Disable unit testing job"
         type: string
@@ -252,8 +252,13 @@ jobs:
           echo "${{ needs.validate-version.outputs.package-scope }}:registry=${{ inputs.registry }}" > ~/.npmrc
           echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ inputs.auth-value }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
+          echo "auth value: ${{ inputs.auth-value }}"
+          echo "token value: ${{ github.token }}"
           echo "npmrc content:"
           cat ~/.npmrc
+
+      - name: Verify npm authentication
+        run: npm whoami || echo "Authentication failed"
 
       - name: Publish package
         run: yarn publish --new-version $(jq -r .version package.json) --non-interactive --access ${{ inputs.access }}
