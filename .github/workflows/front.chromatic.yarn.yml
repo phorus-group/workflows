@@ -45,7 +45,7 @@ jobs:
           AUTH_VALUE: ${{ inputs.auth-value || github.token }}
         run: |
           echo "${{ inputs.registry-scope }}:registry=https://${{ inputs.private-registry }}" >> ~/.npmrc
-          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=$AUTH_VALUE" >> ~/.npmrc
+          echo "//${{ inputs.private-registry }}/:_${{ inputs.auth-key }}=$AUTH_VALUE" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
 
       - name: Install dependencies
