@@ -8,6 +8,24 @@ on:
         type: string
         required: false
         default: "22.2.0"
+      registry-scope:
+        description: "Scope to use with the private registry"
+        type: string
+        required: false
+      private-registry:
+        description: "Private NPM registry to use"
+        type: string
+        required: false
+        default: "npm.pkg.github.com"
+      auth-key:
+        description: "Auth key to use inside ~/.npmrc"
+        type: string
+        required: false
+        default: "authToken"
+      auth-value:
+        description: "Auth value to use inside ~/.npmrc. Defaults to github.token"
+        type: string
+        required: false
       disable-unit-test:
         description: "Disable unit testing job"
         type: string
@@ -61,6 +79,15 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
 
+      - name: Configure npm registry globally in ~/.npmrc
+        if: ${{ inputs.registry-scope != '' }}
+        env:
+          AUTH_VALUE: ${{ inputs.auth-value || github.token }}
+        run: |
+          echo "${{ inputs.registry-scope }}:registry=https://${{ inputs.private-registry }}" >> ~/.npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=$AUTH_VALUE" >> ~/.npmrc
+          echo "always-auth=true" >> ~/.npmrc
+
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
@@ -90,6 +117,15 @@ jobs:
         if: ${{ inputs.disable-unit-test != 'true' }}
         uses: actions/checkout@v4
 
+      - name: Configure npm registry globally in ~/.npmrc
+        if: ${{ inputs.registry-scope != '' }}
+        env:
+          AUTH_VALUE: ${{ inputs.auth-value || github.token }}
+        run: |
+          echo "${{ inputs.registry-scope }}:registry=https://${{ inputs.private-registry }}" >> ~/.npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=$AUTH_VALUE" >> ~/.npmrc
+          echo "always-auth=true" >> ~/.npmrc
+
       - name: Run unit-tests
         if: ${{ inputs.disable-unit-test != 'true' }}
         uses: phorus-group/yarn-test-action@main
@@ -111,6 +147,15 @@ jobs:
       - name: Checkout code
         if: ${{ inputs.disable-integration-test != 'true' }}
         uses: actions/checkout@v4
+
+      - name: Configure npm registry globally in ~/.npmrc
+        if: ${{ inputs.registry-scope != '' }}
+        env:
+          AUTH_VALUE: ${{ inputs.auth-value || github.token }}
+        run: |
+          echo "${{ inputs.registry-scope }}:registry=https://${{ inputs.private-registry }}" >> ~/.npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=$AUTH_VALUE" >> ~/.npmrc
+          echo "always-auth=true" >> ~/.npmrc
 
       - name: Run integration-tests
         if: ${{ inputs.disable-integration-test != 'true' }}

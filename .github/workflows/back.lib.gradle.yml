@@ -277,7 +277,7 @@ jobs:
         if: ${{ inputs.disable-integration-test != 'true' && inputs.disable-unit-test != 'true' }}
         uses: actions/checkout@v4
 
-      - name: Run unit-tests
+      - name: Merge test reports
         if: ${{ inputs.disable-integration-test != 'true' && inputs.disable-unit-test != 'true' }}
         uses: phorus-group/gradle-merge-reports-action@main
         with:

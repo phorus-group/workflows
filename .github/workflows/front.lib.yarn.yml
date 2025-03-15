@@ -149,6 +149,14 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
 
+      - name: Configure npm registry globally in ~/.npmrc to download dependencies from the same scope as the project
+        env:
+          AUTH_VALUE: ${{ inputs.auth-value || github.token }}
+        run: |
+          echo "${{ needs.validate-version.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=$AUTH_VALUE" >> ~/.npmrc
+          echo "always-auth=true" >> ~/.npmrc
+
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
@@ -177,6 +185,14 @@ jobs:
         if: ${{ inputs.disable-unit-test != 'true' }}
         uses: actions/checkout@v4
 
+      - name: Configure npm registry globally in ~/.npmrc to download dependencies from the same scope as the project
+        env:
+          AUTH_VALUE: ${{ inputs.auth-value || github.token }}
+        run: |
+          echo "${{ needs.validate-version.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=$AUTH_VALUE" >> ~/.npmrc
+          echo "always-auth=true" >> ~/.npmrc
+
       - name: Run unit-tests
         if: ${{ inputs.disable-unit-test != 'true' }}
         uses: phorus-group/yarn-test-action@main
@@ -197,6 +213,14 @@ jobs:
       - name: Checkout code
         if: ${{ inputs.disable-integration-test != 'true' }}
         uses: actions/checkout@v4
+
+      - name: Configure npm registry globally in ~/.npmrc to download dependencies from the same scope as the project
+        env:
+          AUTH_VALUE: ${{ inputs.auth-value || github.token }}
+        run: |
+          echo "${{ needs.validate-version.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=$AUTH_VALUE" >> ~/.npmrc
+          echo "always-auth=true" >> ~/.npmrc
 
       - name: Run integration-tests
         if: ${{ inputs.disable-integration-test != 'true' }}
@@ -249,7 +273,6 @@ jobs:
         with:
           name: lib-build
 
-        #Github doesn't support using the github.token as an input default in reusable workflow, but it works in custom actions, weird stuff
       - name: Configure npm registry globally in ~/.npmrc
         env:
           AUTH_VALUE: ${{ inputs.auth-value || github.token }}
