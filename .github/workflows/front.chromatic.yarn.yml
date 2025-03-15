@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
+      packages: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -48,9 +48,10 @@ jobs:
           echo "${{ inputs.registry-scope }}:registry=https://${{ inputs.private-registry }}" >> ~/.npmrc
           echo "//${{ inputs.private-registry }}/:_${{ inputs.auth-key }}=${{ inputs.auth-value || github.token }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
+          rm -rf yarn.lock
 
       - name: Install dependencies
-        run: yarn install --frozen-lockfile
+        run: yarn install #--frozen-lockfile
 
       - name: Run Chromatic
         uses: chromaui/action@v11.17.0

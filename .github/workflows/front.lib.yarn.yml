@@ -158,7 +158,7 @@ jobs:
           echo "always-auth=true" >> ~/.npmrc
 
       - name: Install dependencies
-        run: yarn install --frozen-lockfile
+        run: yarn install --immutable
 
       - name: Lint
         run: yarn lint
