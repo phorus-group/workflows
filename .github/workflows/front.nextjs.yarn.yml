@@ -119,7 +119,7 @@ jobs:
         if: ${{ inputs.registry-scope != '' }}
         run: |
           echo "${{ inputs.registry-scope }}:registry=https://${{ inputs.private-registry }}" >> ~/.npmrc
-          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ secrets.auth-value || secrets.PACKAGES_READ }}" >> ~/.npmrc
+          echo "//${{ inputs.private-registry }}/:_${{ inputs.auth-key }}=${{ secrets.auth-value || secrets.PACKAGES_READ }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
 
       - name: Run unit-tests
@@ -148,7 +148,7 @@ jobs:
         if: ${{ inputs.registry-scope != '' }}
         run: |
           echo "${{ inputs.registry-scope }}:registry=https://${{ inputs.private-registry }}" >> ~/.npmrc
-          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ secrets.auth-value || secrets.PACKAGES_READ }}" >> ~/.npmrc
+          echo "//${{ inputs.private-registry }}/:_${{ inputs.auth-key }}=${{ secrets.auth-value || secrets.PACKAGES_READ }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
 
       - name: Run integration-tests
