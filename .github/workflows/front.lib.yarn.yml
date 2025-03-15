@@ -12,7 +12,7 @@ on:
         description: "NPM registry to use"
         type: string
         required: false
-        default: "https://npm.pkg.github.com"
+        default: "npm.pkg.github.com"
       access:
         description: "Package access. public / private"
         type: string
