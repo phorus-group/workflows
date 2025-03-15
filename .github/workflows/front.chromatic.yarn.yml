@@ -47,10 +47,9 @@ jobs:
           echo "${{ inputs.registry-scope }}:registry=https://${{ inputs.private-registry }}" >> ~/.npmrc
           echo "//${{ inputs.private-registry }}/:_${{ inputs.auth-key }}=${{ secrets.auth-value || secrets.PACKAGES_READ }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
-          rm -rf yarn.lock
 
       - name: Install dependencies
-        run: yarn install #--frozen-lockfile
+        run: yarn install --immutable
 
       - name: Run Chromatic
         uses: chromaui/action@v11.17.0

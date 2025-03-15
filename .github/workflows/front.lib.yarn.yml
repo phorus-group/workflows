@@ -268,11 +268,9 @@ jobs:
           name: lib-build
 
       - name: Configure npm registry globally in ~/.npmrc
-        env:
-          AUTH_VALUE: ${{ secrets.pub-auth-value || github.token }}
         run: |
           echo "${{ needs.validate-version.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
-          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=$AUTH_VALUE" >> ~/.npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ secrets.pub-auth-value || github.token }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
 
       - name: Publish package
