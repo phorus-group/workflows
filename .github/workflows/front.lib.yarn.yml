@@ -261,6 +261,7 @@ jobs:
           echo "token value: ${{ github.token }}"
           echo "npmrc content:"
           cat .npmrc
+          npm config list
 
       - name: Verify npm authentication
         run: npm whoami || echo "Authentication failed"
