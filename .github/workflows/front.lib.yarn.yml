@@ -23,14 +23,6 @@ on:
         type: string
         required: false
         default: "authToken"
-      pub-auth-value:
-        description: "Auth value to use inside ~/.npmrc for publishing. Defaults to github.token"
-        type: string
-        required: false
-      read-auth-value:
-        description: "Auth value to use inside ~/.npmrc for reading. Defaults to secret.PACKAGES_READ" # Remember that the github.token only has access to the current repo packages
-        type: string
-        required: false
       disable-unit-test:
         description: "Disable unit testing job"
         type: string
@@ -71,6 +63,13 @@ on:
         type: number
         required: false
         default: 0
+    secrets:
+      pub-auth-value:
+        description: "Auth value to use inside ~/.npmrc for publishing. Defaults to github.token"
+        required: false
+      read-auth-value:
+        description: "Auth value to use inside ~/.npmrc for reading. Defaults to secrets.PACKAGES_READ" # Remember that the github.token only has access to the current repo packages
+        required: false
 
 jobs:
   validate-version:
@@ -102,7 +101,7 @@ jobs:
       - name: Get published version from GitHub Package Registry
         id: published
         run: |
-          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ inputs.read-auth-value || secret.PACKAGES_READ }}" >> ~/.npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ secrets.read-auth-value || secrets.PACKAGES_READ }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
           PUBLISHED_VERSION=$(npm view ${{ steps.package.outputs.name }} version --registry=https://${{ inputs.registry }} || echo "0.0.0")
           echo "version=$PUBLISHED_VERSION" >> $GITHUB_OUTPUT
@@ -153,7 +152,7 @@ jobs:
       - name: Configure npm registry globally in ~/.npmrc to download dependencies from the same scope as the project
         run: |
           echo "${{ needs.validate-version.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
-          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ inputs.read-auth-value || secret.PACKAGES_READ }}" >> ~/.npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ secrets.read-auth-value || secrets.PACKAGES_READ }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
 
       - name: Install dependencies
@@ -187,7 +186,7 @@ jobs:
       - name: Configure npm registry globally in ~/.npmrc to download dependencies from the same scope as the project
         run: |
           echo "${{ needs.validate-version.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
-          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ inputs.read-auth-value || secret.PACKAGES_READ }}" >> ~/.npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ secrets.read-auth-value || secrets.PACKAGES_READ }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
 
       - name: Run unit-tests
@@ -214,7 +213,7 @@ jobs:
       - name: Configure npm registry globally in ~/.npmrc to download dependencies from the same scope as the project
         run: |
           echo "${{ needs.validate-version.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
-          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ inputs.read-auth-value || secret.PACKAGES_READ }}" >> ~/.npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ secrets.read-auth-value || secrets.PACKAGES_READ }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
 
       - name: Run integration-tests
@@ -270,7 +269,7 @@ jobs:
 
       - name: Configure npm registry globally in ~/.npmrc
         env:
-          AUTH_VALUE: ${{ inputs.pub-auth-value || github.token }}
+          AUTH_VALUE: ${{ secrets.pub-auth-value || github.token }}
         run: |
           echo "${{ needs.validate-version.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
           echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=$AUTH_VALUE" >> ~/.npmrc
