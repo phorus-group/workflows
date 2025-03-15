@@ -103,7 +103,7 @@ jobs:
         run: |
           echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=$AUTH_VALUE" >> .npmrc
           echo "always-auth=true" >> .npmrc
-          PUBLISHED_VERSION=$(npm view ${{ steps.package.outputs.name }} version --registry=${{ inputs.registry }} || echo "0.0.0")
+          PUBLISHED_VERSION=$(npm view ${{ steps.package.outputs.name }} version --registry=https://${{ inputs.registry }} || echo "0.0.0")
           echo "version=$PUBLISHED_VERSION" >> $GITHUB_OUTPUT
 
       - name: Setup Node.js
@@ -254,7 +254,7 @@ jobs:
         env:
           AUTH_VALUE: ${{ inputs.auth-value || github.token }}
         run: |
-          echo "${{ needs.validate-version.outputs.package-scope }}:registry=${{ inputs.registry }}" >> .npmrc
+          echo "${{ needs.validate-version.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> .npmrc
           echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=$AUTH_VALUE" >> .npmrc
           echo "always-auth=true" >> .npmrc
           echo "auth value: ${{ inputs.auth-value }}"
