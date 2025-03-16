@@ -193,15 +193,10 @@ jobs:
         with:
           name: gradle-build
 
-      - name: "Check build folder"
-        run: |
-          ls -la
-          ls -la build
-          ls -la build/libs
-
       - name: Build and push Docker image
         uses: phorus-group/docker-action@main
         with:
+          vulnerability-analysis: false # Disabled because almost every image that is not alpine has more than 10 vulnerabilities
           dockerfile-path: "dockerfiles/Dockerfile.gradle"
           push: true
 
