@@ -171,6 +171,7 @@ jobs:
         with:
           distribution: ${{ inputs.java-distribution }}
           java-version: ${{ inputs.java-version }}
+          cache: gradle
 
       - name: "Generate gradle lockfile"
         run: |
