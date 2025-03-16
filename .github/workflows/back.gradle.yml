@@ -118,16 +118,14 @@ jobs:
 
   merge-test-reports:
     name: Merge test reports
-    if: ${{ inputs.disable-merge-test-reports != 'true' }}
+    if: ${{ inputs.disable-merge-test-reports != 'true' && inputs.disable-integration-test != 'true' && inputs.disable-unit-test != 'true' }}
     needs: [unit-test,integration-test]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        if: ${{ inputs.disable-integration-test != 'true' && inputs.disable-unit-test != 'true' }}
         uses: actions/checkout@v4
 
       - name: Merge test reports
-        if: ${{ inputs.disable-integration-test != 'true' && inputs.disable-unit-test != 'true' }}
         uses: phorus-group/gradle-merge-reports-action@main
         with:
           java-version: ${{ inputs.java-version }}
