@@ -3,6 +3,11 @@ name: Reusable workflow to build and publish a NextJS docker image to GHCR
 on:
   workflow_call:
     inputs:
+      lfs:
+        description: "Enable git LFS"
+        type: boolean
+        required: false
+        default: false
       node-version:
         description: "Node version to use"
         type: string
@@ -73,6 +78,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          lfs: ${{ inputs.lfs }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
