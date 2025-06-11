@@ -248,7 +248,7 @@ jobs:
           java-version: ${{ inputs.java-version }}
           java-distribution: ${{ inputs.java-distribution }}
           gradle-version: ${{ inputs.gradle-version }}
-          commandsg: check unitTest -x test
+          commandsg: check unitTest -x :test
           artifact-suffix: unit
 
   integration-test:
