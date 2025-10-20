@@ -158,6 +158,35 @@ jobs:
           echo "//${{ inputs.private-registry }}/:_${{ inputs.auth-key }}=${{ secrets.auth-value || secrets.PACKAGES_READ }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
 
+      - name: Set up Node.js
+        if: ${{ inputs.disable-integration-test != 'true' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: 'yarn'
+
+      - name: Install dependencies
+        if: ${{ inputs.disable-integration-test != 'true' }}
+        run: yarn install --frozen-lockfile
+
+      - name: Get Playwright version
+        if: ${{ inputs.disable-integration-test != 'true' }}
+        id: playwright-version
+        shell: bash
+        run: echo "version=$(node -e "console.log(require('@playwright/test/package.json').version)")" >> $GITHUB_OUTPUT
+
+      - name: Cache Playwright browsers
+        if: ${{ inputs.disable-integration-test != 'true' }}
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+
+      - name: Install Playwright browsers
+        if: ${{ inputs.disable-integration-test != 'true' }}
+        shell: bash
+        run: npx playwright install --with-deps
+
       - name: Run integration-tests
         if: ${{ inputs.disable-integration-test != 'true' }}
         uses: phorus-group/yarn-test-action@main
