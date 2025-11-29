@@ -288,6 +288,15 @@ jobs:
           npm pkg delete scripts.prepare
           yarn publish --new-version $(jq -r .version package.json) --non-interactive --access ${{ inputs.access }}
 
+      - name: Publish summary
+        if: success()
+        run: |
+          echo "## ✅ Published Successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Scope:** ${{ needs.validate-version.outputs.package-scope }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Package:** ${{ needs.validate-version.outputs.package-name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ needs.validate-version.outputs.package-version }}" >> $GITHUB_STEP_SUMMARY
+
   enforce-all-checks:
     name: Enforce all checks
     needs: [validate-version,unit-test,integration-test,code-quality,vulnerability-analysis]

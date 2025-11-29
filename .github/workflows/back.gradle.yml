@@ -1,7 +1,5 @@
 name: Reusable gradle workflow to build and publish a docker image to GHCR
 
-# WIP - We need to make it work with private registries
-
 on:
   workflow_call:
     inputs:
@@ -15,6 +13,16 @@ on:
         type: string
         required: false
         default: "temurin"
+      registry-username:
+        description: "Username for registry authentication (used for reading dependencies). Default: github.actor"
+        type: string
+        required: false
+        default: ""
+      registry:
+        description: "Registry URL for reading dependencies. Default: https://maven.pkg.github.com"
+        type: string
+        required: false
+        default: "https://maven.pkg.github.com"
       build-and-test:
         description: "Build and test at the same time"
         type: boolean
@@ -65,6 +73,10 @@ on:
         type: number
         required: false
         default: 0
+    secrets:
+      read-auth-value:
+        description: "Auth value for reading dependencies. Default: github.token"
+        required: false
 
 jobs:
   build:
@@ -79,6 +91,9 @@ jobs:
           java-version: ${{ inputs.java-version }}
           java-distribution: ${{ inputs.java-distribution }}
           build-and-test: ${{ inputs.build-and-test }}
+        env:
+          ORG_GRADLE_PROJECT_readUsername: ${{ inputs.registry-username || github.actor }}
+          ORG_GRADLE_PROJECT_readPassword: ${{ secrets.read-auth-value || github.token }}
 
   unit-test:
     name: Unit tests
@@ -97,6 +112,9 @@ jobs:
           java-distribution: ${{ inputs.java-distribution }}
           commands: check unitTest -x :test
           artifact-suffix: unit
+        env:
+          ORG_GRADLE_PROJECT_readUsername: ${{ inputs.registry-username || github.actor }}
+          ORG_GRADLE_PROJECT_readPassword: ${{ secrets.read-auth-value || github.token }}
 
   integration-test:
     name: Integration tests
@@ -115,6 +133,9 @@ jobs:
           java-distribution: ${{ inputs.java-distribution }}
           commands: integrationTest
           artifact-suffix: integration
+        env:
+          ORG_GRADLE_PROJECT_readUsername: ${{ inputs.registry-username || github.actor }}
+          ORG_GRADLE_PROJECT_readPassword: ${{ secrets.read-auth-value || github.token }}
 
   merge-test-reports:
     name: Merge test reports
@@ -176,6 +197,9 @@ jobs:
           mkdir -p ~/.gradle
           echo "allprojects { dependencyLocking { lockAllConfigurations() } }" >> ~/.gradle/init.gradle
           ./gradlew dependencies --write-locks
+        env:
+          ORG_GRADLE_PROJECT_readUsername: ${{ inputs.registry-username || github.actor }}
+          ORG_GRADLE_PROJECT_readPassword: ${{ secrets.read-auth-value || github.token }}
 
       - name: Analyse project for vulnerabilities
         uses: phorus-group/vulnerability-analysis-action@main
