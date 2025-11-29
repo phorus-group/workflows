@@ -1,7 +1,5 @@
 name: Reusable library workflow to build and publish a gradle library
 
-# WIP - We need to make it work with private registries
-
 on:
   workflow_call:
     inputs:
@@ -20,41 +18,31 @@ on:
         type: string
         required: false
         default: "8.5"
-      metadata-base-url:
-        description: "Base URL for Maven metadata (Sonatype, GitHub, JFrog, etc)"
+      publish-task:
+        description: "Gradle publish task to run. Default: 'publish'. Examples: 'publish' (maven-publish plugin for GitHub/JFrog/Nexus), 'publishToMavenCentral' (vanniktech plugin)"
         type: string
         required: false
-        default: "https://maven.pkg.github.com/${{ github.repository_owner }}/${{ github.event.repository.name }}"
+        default: "publish"
+      registry-username:
+        description: "Username for registry authentication (used for reading dependencies, metadata, and publishing). Default: github.actor. Examples: GitHub actor, Maven Central token username"
+        type: string
+        required: false
+        default: ""
+      metadata-base-url:
+        description: "Base URL for Maven metadata. Will be constructed from github.repository if not provided. Examples: 'https://maven.pkg.github.com/owner/repo' (GitHub), 'https://repo1.maven.org/maven2' (Maven Central)"
+        type: string
+        required: false
+        default: ""
       metadata-auth-method:
-        description: "The auth method used to access the registry for metadata. header / basic / none"
+        description: "Auth method for metadata: 'header' (uses Authorization: Bearer), 'basic' (uses username:password), 'none'"
         type: string
         required: false
         default: "header"
-      metadata-auth-key:
-        description: "The metadata auth key. Used as the header key (in auth-method: header) or as the username (in auth-method: basic)"
-        type: string
-        required: false
-        default: "Authorization"
-      metadata-auth-value:
-        description: "The metadata auth value. Used as the header value (in auth-method: header) or as the password (in auth-method: basic)"
-        type: string
-        required: false
-        default: "Bearer ${{ github.token }}"
       registry:
-        description: "Registry to use"
+        description: "Registry URL for reading dependencies and publishing. Default: https://maven.pkg.github.com. Examples: 'https://maven.pkg.github.com' (GitHub), 'https://repo1.maven.org/maven2' (Maven Central)"
         type: string
         required: false
         default: "https://maven.pkg.github.com"
-      auth-key:
-        description: "Auth key to use inside ~/.npmrc"
-        type: string
-        required: false
-        default: "authToken"
-      auth-value:
-        description: "Auth value to use inside ~/.npmrc"
-        type: string
-        required: false
-        default: ${{ github.token }}
       build-and-test:
         description: "Build and test at the same time"
         type: boolean
@@ -100,6 +88,19 @@ on:
         type: number
         required: false
         default: 0
+    secrets:
+      read-auth-value:
+        description: "Auth value for reading dependencies and metadata. Default: github.token"
+        required: false
+      pub-auth-value:
+        description: "Auth value for publishing. Default: github.token"
+        required: false
+      signing-key:
+        description: "GPG signing key (ASCII-armored). Required for Maven Central, optional for others"
+        required: false
+      signing-password:
+        description: "GPG signing key password. Required if signing-key is provided"
+        required: false
 
 jobs:
   validate-version:
@@ -116,45 +117,16 @@ jobs:
       - name: Extract package data from Gradle build file
         id: package
         run: |
-          # Detect build.gradle(.kts) file
-          ls -la
-          if [[ -f "build.gradle.kts" ]]; then
-            GRADLE_FILE="build.gradle.kts"
-          elif [[ -f "build.gradle" ]]; then
-            GRADLE_FILE="build.gradle"
-          else
-            echo "Error: No build.gradle(.kts) file found."
-            exit 1
-          fi
+          PACKAGE_GROUP=$(./gradlew properties --no-daemon --console=plain -q | grep "^group:" | awk '{print $2}')
+          PACKAGE_VERSION=$(./gradlew properties --no-daemon --console=plain -q | grep "^version:" | awk '{print $2}')
+          PACKAGE_NAME=$(./gradlew properties --no-daemon --console=plain -q | grep "^name:" | awk '{print $2}')
           
-          # Detect settings.gradle(.kts) file
-          ls -la
-          if [[ -f "settings.gradle.kts" ]]; then
-            SETTINGS_FILE="settings.gradle.kts"
-          elif [[ -f "settings.gradle" ]]; then
-            SETTINGS_FILE="settings.gradle"
-          else
-            echo "Error: No settings.gradle(.kts) file found."
-            exit 1
-          fi
-          
-          echo "Gradle file: $GRADLE_FILE"
-          
-          # Extract group and version from build.gradle(.kts)
-          PACKAGE_GROUP=$(grep -E 'group\s*=\s*".+"' "$GRADLE_FILE" | awk -F'"' '{print $2}' | head -n 1)
-          PACKAGE_VERSION=$(grep -E 'version\s*=\s*".+"' "$GRADLE_FILE" | awk -F'"' '{print $2}' | head -n 1)
-          
-          # Extract rootProject.name from settings.gradle(.kts)
-          PACKAGE_NAME=$(grep -E 'rootProject\.name\s*=\s*".+"' "$SETTINGS_FILE" | awk -F'"' '{print $2}' | head -n 1)
-          
-          # Output extracted values
           echo "Group: $PACKAGE_GROUP"
           echo "Version: $PACKAGE_VERSION"
           echo "Name: $PACKAGE_NAME"
           
-          # Ensure values were extracted correctly
           if [[ -z "$PACKAGE_GROUP" || -z "$PACKAGE_VERSION" || -z "$PACKAGE_NAME" ]]; then
-            echo "Error: Could not extract group, version, or rootProject.name."
+            echo "Error: Could not extract group, version, or name from Gradle properties."
             exit 1
           fi
           
@@ -165,31 +137,38 @@ jobs:
       - name: Get published version from registry
         id: published
         run: |
+          # Construct metadata URL
+          if [[ -z "${{ inputs.metadata-base-url }}" ]]; then
+            METADATA_BASE_URL="https://maven.pkg.github.com/${{ github.repository }}"
+          else
+            METADATA_BASE_URL="${{ inputs.metadata-base-url }}"
+          fi
+          
           GROUP_PATH=$(echo "${{ steps.package.outputs.group }}" | tr '.' '/')
-          METADATA_URL="${{ inputs.metadata-base-url }}/${GROUP_PATH}/${{ steps.package.outputs.name }}/maven-metadata.xml"
+          METADATA_URL="${METADATA_BASE_URL}/${GROUP_PATH}/${{ steps.package.outputs.name }}/maven-metadata.xml"
           
           echo "Fetching metadata from: $METADATA_URL"
 
           if [[ "${{ inputs.metadata-auth-method }}" == "basic" ]]; then
-            PUBLISHED_VERSION=$(curl -u "${{ inputs.metadata-auth-key }}:${{ inputs.metadata-auth-value }}" -s "$METADATA_URL" | grep -oPm1 "<latest>[^<]+" | sed 's/<latest>//')
+            PUBLISHED_VERSION=$(curl -u "${{ inputs.registry-username || github.actor }}:${{ secrets.read-auth-value || github.token }}" -s "$METADATA_URL" | grep -oPm1 "<latest>[^<]+" | sed 's/<latest>//' || echo "")
           elif [[ "${{ inputs.metadata-auth-method }}" == "header" ]]; then
-            PUBLISHED_VERSION=$(curl -H "${{ inputs.metadata-auth-key }}: ${{ inputs.metadata-auth-value }}" -s "$METADATA_URL" | grep -oPm1 "<latest>[^<]+" | sed 's/<latest>//')
+            PUBLISHED_VERSION=$(curl -H "Authorization: Bearer ${{ secrets.read-auth-value || github.token }}" -s "$METADATA_URL" | grep -oPm1 "<latest>[^<]+" | sed 's/<latest>//' || echo "")
           else
-            PUBLISHED_VERSION=$(curl -s "$METADATA_URL" | grep -oPm1 "<latest>[^<]+" | sed 's/<latest>//')
+            PUBLISHED_VERSION=$(curl -s "$METADATA_URL" | grep -oPm1 "<latest>[^<]+" | sed 's/<latest>//' || echo "")
           fi
           
-  
           if [[ -z "$PUBLISHED_VERSION" ]]; then
+            echo "No published version found, using 0.0.0"
             PUBLISHED_VERSION="0.0.0"
           fi
-        
+          
           echo "Extracted published version: $PUBLISHED_VERSION"
           echo "version=$PUBLISHED_VERSION" >> $GITHUB_OUTPUT 
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ inputs.node-version }}
+          node-version: "20"
 
       - name: Install semver package
         run: |
@@ -216,6 +195,7 @@ jobs:
               console.error(`Error: Version ${next} is not greater than published ${current}`);
               process.exit(1);
             }
+            console.log(`✓ Version ${next} is valid and greater than ${current}`);
           '
 
   build:
@@ -231,6 +211,9 @@ jobs:
           java-distribution: ${{ inputs.java-distribution }}
           gradle-version: ${{ inputs.gradle-version }}
           build-and-test: ${{ inputs.build-and-test }}
+        env:
+          ORG_GRADLE_PROJECT_readUsername: ${{ inputs.registry-username || github.actor }}
+          ORG_GRADLE_PROJECT_readPassword: ${{ secrets.read-auth-value || github.token }}
 
   unit-test:
     name: Unit tests
@@ -248,8 +231,11 @@ jobs:
           java-version: ${{ inputs.java-version }}
           java-distribution: ${{ inputs.java-distribution }}
           gradle-version: ${{ inputs.gradle-version }}
-          commandsg: check unitTest -x :test
+          commands: check unitTest -x :test
           artifact-suffix: unit
+        env:
+          ORG_GRADLE_PROJECT_readUsername: ${{ inputs.registry-username || github.actor }}
+          ORG_GRADLE_PROJECT_readPassword: ${{ secrets.read-auth-value || github.token }}
 
   integration-test:
     name: Integration tests
@@ -269,10 +255,13 @@ jobs:
           gradle-version: ${{ inputs.gradle-version }}
           commands: integrationTest
           artifact-suffix: integration
+        env:
+          ORG_GRADLE_PROJECT_readUsername: ${{ inputs.registry-username || github.actor }}
+          ORG_GRADLE_PROJECT_readPassword: ${{ secrets.read-auth-value || github.token }}
 
   merge-test-reports:
     name: Merge test reports
-    needs: [unit-test,integration-test]
+    needs: [unit-test, integration-test]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -320,21 +309,24 @@ jobs:
         with:
           name: gradle-build
 
-      - name: "Setup Java"
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: ${{ inputs.java-distribution }}
           java-version: ${{ inputs.java-version }}
 
-      - name: "Setup Gradle"
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: ${{ inputs.gradle-version }}
 
-      - name: "Generate gradle lockfile"
+      - name: Generate gradle lockfile
         run: |
           echo "allprojects { dependencyLocking { lockAllConfigurations() } }" >> ~/.gradle/init.gradle
           ./gradlew dependencies --write-locks
+        env:
+          ORG_GRADLE_PROJECT_readUsername: ${{ inputs.registry-username || github.actor }}
+          ORG_GRADLE_PROJECT_readPassword: ${{ secrets.read-auth-value || github.token }}
 
       - name: Analyse project for vulnerabilities
         uses: phorus-group/vulnerability-analysis-action@main
@@ -344,27 +336,54 @@ jobs:
 
   publish:
     name: Publish library
-    needs: [validate-version,unit-test,integration-test,code-quality,vulnerability-analysis]
+    needs: [validate-version, unit-test, integration-test, code-quality, vulnerability-analysis]
     if: ${{ github.ref_name == github.event.repository.default_branch }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           name: gradle-build
 
-      - name: Configure npm registry globally in ~/.npmrc
-        run: |
-          echo "${{ needs.validate-version.outputs.package-scope }}:registry=${{ inputs.registry }}" > ~/.npmrc
-          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ inputs.auth-value }}" >> ~/.npmrc
-          echo "always-auth=true" >> ~/.npmrc
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ inputs.java-distribution }}
+          java-version: ${{ inputs.java-version }}
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ inputs.gradle-version }}
 
       - name: Publish package
-        run: yarn publish --non-interactive --access ${{ inputs.access }}
+        run: ./gradlew ${{ inputs.publish-task }} --no-configuration-cache --stacktrace
+        env:
+          ORG_GRADLE_PROJECT_publishUsername: ${{ inputs.registry-username || github.actor }}
+          ORG_GRADLE_PROJECT_publishPassword: ${{ secrets.pub-auth-value || github.token }}
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ inputs.registry-username || github.actor }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.pub-auth-value || github.token }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.signing-key }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.signing-password }}
+
+      - name: Publish summary
+        if: success()
+        run: |
+          echo "## ✅ Published Successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Group:** ${{ needs.validate-version.outputs.package-group }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Artifact:** ${{ needs.validate-version.outputs.package-name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ needs.validate-version.outputs.package-version }}" >> $GITHUB_STEP_SUMMARY
 
   enforce-all-checks:
     name: Enforce all checks
-    needs: [validate-version,unit-test,integration-test,code-quality,vulnerability-analysis]
+    needs: [validate-version, unit-test, integration-test, code-quality, vulnerability-analysis]
     if: ${{ github.ref_name != github.event.repository.default_branch }}
     runs-on: ubuntu-latest
     permissions:
