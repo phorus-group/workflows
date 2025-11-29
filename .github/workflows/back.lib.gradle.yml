@@ -13,11 +13,6 @@ on:
         type: string
         required: false
         default: "temurin"
-      gradle-version:
-        description: "Gradle version to use"
-        type: string
-        required: false
-        default: "8.5"
       publish-task:
         description: "Gradle publish task to run. Default: 'publish'. Examples: 'publish' (maven-publish plugin for GitHub/JFrog/Nexus), 'publishToMavenCentral' (vanniktech plugin)"
         type: string
@@ -209,7 +204,6 @@ jobs:
         with:
           java-version: ${{ inputs.java-version }}
           java-distribution: ${{ inputs.java-distribution }}
-          gradle-version: ${{ inputs.gradle-version }}
           build-and-test: ${{ inputs.build-and-test }}
         env:
           ORG_GRADLE_PROJECT_readUsername: ${{ inputs.registry-username || github.actor }}
@@ -230,7 +224,6 @@ jobs:
         with:
           java-version: ${{ inputs.java-version }}
           java-distribution: ${{ inputs.java-distribution }}
-          gradle-version: ${{ inputs.gradle-version }}
           commands: check unitTest -x :test
           artifact-suffix: unit
         env:
@@ -252,7 +245,6 @@ jobs:
         with:
           java-version: ${{ inputs.java-version }}
           java-distribution: ${{ inputs.java-distribution }}
-          gradle-version: ${{ inputs.gradle-version }}
           commands: integrationTest
           artifact-suffix: integration
         env:
@@ -313,11 +305,6 @@ jobs:
           distribution: ${{ inputs.java-distribution }}
           java-version: ${{ inputs.java-version }}
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: ${{ inputs.gradle-version }}
-
       - name: Generate gradle lockfile
         run: |
           echo "allprojects { dependencyLocking { lockAllConfigurations() } }" >> ~/.gradle/init.gradle
@@ -354,11 +341,6 @@ jobs:
         with:
           distribution: ${{ inputs.java-distribution }}
           java-version: ${{ inputs.java-version }}
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: ${{ inputs.gradle-version }}
 
       - name: Publish package
         run: ./gradlew ${{ inputs.publish-task }} --no-configuration-cache --stacktrace
