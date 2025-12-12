@@ -155,22 +155,23 @@ jobs:
           test-artifact-1: gradle-tests-unit
           test-artifact-2: gradle-tests-integration
 
-  code-quality:
-    name: Code quality check
-    needs: [build]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+  # This is giving us issues with GHA runners, so we are disabling it for now
+  # code-quality:
+  #   name: Code quality check
+  #   needs: [build]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
 
-      - name: Check code quality
-        uses: phorus-group/code-quality-action@main
-        with:
-          info-threshold: ${{ inputs.code-quality-info-threshold }}
-          minor-threshold: ${{ inputs.code-quality-minor-threshold }}
-          major-threshold: ${{ inputs.code-quality-major-threshold }}
-          critical-threshold: ${{ inputs.code-quality-critical-threshold }}
-          blocker-threshold: ${{ inputs.code-quality-blocker-threshold }}
+  #     - name: Check code quality
+  #       uses: phorus-group/code-quality-action@main
+  #       with:
+  #         info-threshold: ${{ inputs.code-quality-info-threshold }}
+  #         minor-threshold: ${{ inputs.code-quality-minor-threshold }}
+  #         major-threshold: ${{ inputs.code-quality-major-threshold }}
+  #         critical-threshold: ${{ inputs.code-quality-critical-threshold }}
+  #         blocker-threshold: ${{ inputs.code-quality-blocker-threshold }}
 
   vulnerability-analysis:
     name: Vulnerability analysis
@@ -209,7 +210,7 @@ jobs:
 
   docker:
     name: Docker build and push
-    needs: [unit-test,integration-test,code-quality,vulnerability-analysis]
+    needs: [unit-test,integration-test,vulnerability-analysis]
     runs-on: ubuntu-latest
     steps:
       - name: Download build artifacts
