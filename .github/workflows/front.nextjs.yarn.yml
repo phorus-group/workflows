@@ -193,22 +193,23 @@ jobs:
         with:
           command: test:integration
 
-  code-quality:
-    name: Code quality check
-    needs: [build]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+  # This is giving us issues with GHA runners, so we are disabling it for now
+  # code-quality:
+  #   name: Code quality check
+  #   needs: [build]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
 
-      - name: Check code quality
-        uses: phorus-group/code-quality-action@main
-        with:
-          info-threshold: ${{ inputs.code-quality-info-threshold }}
-          minor-threshold: ${{ inputs.code-quality-minor-threshold }}
-          major-threshold: ${{ inputs.code-quality-major-threshold }}
-          critical-threshold: ${{ inputs.code-quality-critical-threshold }}
-          blocker-threshold: ${{ inputs.code-quality-blocker-threshold }}
+  #     - name: Check code quality
+  #       uses: phorus-group/code-quality-action@main
+  #       with:
+  #         info-threshold: ${{ inputs.code-quality-info-threshold }}
+  #         minor-threshold: ${{ inputs.code-quality-minor-threshold }}
+  #         major-threshold: ${{ inputs.code-quality-major-threshold }}
+  #         critical-threshold: ${{ inputs.code-quality-critical-threshold }}
+  #         blocker-threshold: ${{ inputs.code-quality-blocker-threshold }}
 
   vulnerability-analysis:
     name: Vulnerability analysis
