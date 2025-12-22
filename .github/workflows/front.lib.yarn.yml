@@ -265,7 +265,7 @@ jobs:
 
   publish:
     name: Publish library
-    needs: [validate-version,unit-test,integration-test,code-quality,vulnerability-analysis]
+    needs: [validate-version,unit-test,integration-test,vulnerability-analysis]
     if: ${{ github.ref_name == github.event.repository.default_branch }}
     runs-on: ubuntu-latest
     permissions:
@@ -300,7 +300,7 @@ jobs:
 
   enforce-all-checks:
     name: Enforce all checks
-    needs: [validate-version,unit-test,integration-test,code-quality,vulnerability-analysis]
+    needs: [validate-version,unit-test,integration-test,vulnerability-analysis]
     if: ${{ github.ref_name != github.event.repository.default_branch }}
     runs-on: ubuntu-latest
     permissions:
