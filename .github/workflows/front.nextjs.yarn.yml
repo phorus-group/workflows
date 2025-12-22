@@ -227,7 +227,7 @@ jobs:
 
   docker:
     name: Docker build and push
-    needs: [unit-test,integration-test,code-quality,vulnerability-analysis]
+    needs: [unit-test,integration-test,vulnerability-analysis]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
