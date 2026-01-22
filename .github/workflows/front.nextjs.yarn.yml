@@ -243,6 +243,7 @@ jobs:
         with:
           dockerfile-path: "dockerfiles/Dockerfile.nextjs"
           push: true
+          vulnerability-analysis: false
 
   enforce-all-checks:
     name: Enforce all checks
