@@ -256,14 +256,15 @@ jobs:
 
   vulnerability-analysis:
     name: Vulnerability analysis
-    if: ${{ !inputs.disable-vulnerability-analysis }}
     needs: [build]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
+        if: ${{ !inputs.disable-vulnerability-analysis }}
         uses: actions/checkout@v4
 
       - name: Analyse project for vulnerabilities
+        if: ${{ !inputs.disable-vulnerability-analysis }}
         uses: phorus-group/vulnerability-analysis-action@main
         with:
           skip-dirs: node_modules,.git

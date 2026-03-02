@@ -180,19 +180,21 @@ jobs:
 
   vulnerability-analysis:
     name: Vulnerability analysis
-    if: ${{ !inputs.disable-vulnerability-analysis }}
     needs: [build]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
+        if: ${{ !inputs.disable-vulnerability-analysis }}
         uses: actions/checkout@v4
 
       - name: Download build artifacts
+        if: ${{ !inputs.disable-vulnerability-analysis }}
         uses: actions/download-artifact@v4
         with:
           name: gradle-build
 
       - name: "Setup Java"
+        if: ${{ !inputs.disable-vulnerability-analysis }}
         uses: actions/setup-java@v4
         with:
           distribution: ${{ inputs.java-distribution }}
@@ -200,6 +202,7 @@ jobs:
           cache: gradle
 
       - name: "Generate gradle lockfile"
+        if: ${{ !inputs.disable-vulnerability-analysis }}
         run: |
           mkdir -p ~/.gradle
           echo "allprojects { dependencyLocking { lockAllConfigurations() } }" >> ~/.gradle/init.gradle
@@ -209,6 +212,7 @@ jobs:
           ORG_GRADLE_PROJECT_readPassword: ${{ secrets.read-auth-value || github.token }}
 
       - name: Analyse project for vulnerabilities
+        if: ${{ !inputs.disable-vulnerability-analysis }}
         uses: phorus-group/vulnerability-analysis-action@main
         with:
           skip-dirs: .git
