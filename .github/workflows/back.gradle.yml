@@ -38,6 +38,11 @@ on:
         type: string
         required: false
         default: "false"
+      disable-vulnerability-analysis:
+        description: "Disable vulnerability analysis job"
+        type: boolean
+        required: false
+        default: false
       disable-merge-test-reports:
         description: "Disable merging the test reports"
         type: string
@@ -175,6 +180,7 @@ jobs:
 
   vulnerability-analysis:
     name: Vulnerability analysis
+    if: ${{ !inputs.disable-vulnerability-analysis }}
     needs: [build]
     runs-on: ubuntu-latest
     steps:

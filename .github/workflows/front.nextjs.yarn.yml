@@ -37,6 +37,11 @@ on:
         type: string
         required: false
         default: "false"
+      disable-vulnerability-analysis:
+        description: "Disable vulnerability analysis job"
+        type: boolean
+        required: false
+        default: false
       gh-advanced-security:
         description: "Enable if you have GitHub Advanced Security"
         type: boolean
@@ -213,6 +218,7 @@ jobs:
 
   vulnerability-analysis:
     name: Vulnerability analysis
+    if: ${{ !inputs.disable-vulnerability-analysis }}
     needs: [build]
     runs-on: ubuntu-latest
     steps:
