@@ -268,26 +268,37 @@ jobs:
               PR_TITLE=$(echo "$PR_ENTRY" | jq -r '.title')
               PR_AUTHOR=$(echo "$PR_ENTRY" | jq -r '.author')
               PR_URL=$(echo "$PR_ENTRY" | jq -r '.url')
-              CHANGELOG+="* ${PR_TITLE} ([#${PR_NUM}](${PR_URL})) by @${PR_AUTHOR}\n"
+              CHANGELOG+="* PR: ${PR_TITLE} ([#${PR_NUM}](${PR_URL})) by @${PR_AUTHOR}\n"
               CONTRIBUTORS+="${PR_AUTHOR}\n"
 
-              PR_EMAIL=$(git log "${sha}^1..${sha}" --no-merges --format="%ae" 2>/dev/null \
-                | grep -v "noreply.github.com" | sort | uniq -c | sort -rn | head -1 | awk '{print $2}' || echo "")
-              if [[ -n "$PR_EMAIL" ]]; then
-                CONTRIBUTOR_EMAILS=$(echo "$CONTRIBUTOR_EMAILS" | jq --arg user "$PR_AUTHOR" --arg email "$PR_EMAIL" '. + {($user): $email}')
+              # Only use emails from commits that GitHub attributes to the PR author
+              PR_EMAIL=""
+              EXISTING_EMAIL=$(echo "$CONTRIBUTOR_EMAILS" | jq -r --arg user "$PR_AUTHOR" '.[$user] // empty')
+              if [[ -z "$EXISTING_EMAIL" ]]; then
+                while read -r commit_sha commit_email; do
+                  if [[ -z "$commit_sha" || "$commit_email" == *"noreply.github.com"* ]]; then continue; fi
+                  COMMIT_LOGIN=$(echo "$COMMIT_MAP" | jq -r --arg s "$commit_sha" '.[$s] // empty')
+                  if [[ "$COMMIT_LOGIN" == "$PR_AUTHOR" ]]; then
+                    PR_EMAIL="$commit_email"
+                    break
+                  fi
+                done <<< "$(git log "${sha}^1..${sha}" --no-merges --format="%H %ae" 2>/dev/null)"
+                if [[ -n "$PR_EMAIL" ]]; then
+                  CONTRIBUTOR_EMAILS=$(echo "$CONTRIBUTOR_EMAILS" | jq --arg user "$PR_AUTHOR" --arg email "$PR_EMAIL" '. + {($user): $email}')
+                fi
               fi
               echo "PR #${PR_NUM}: author=$PR_AUTHOR, email=$PR_EMAIL"
             else
               GH_USER=$(echo "$COMMIT_MAP" | jq -r --arg sha "$sha" '.[$sha] // empty')
 
               if [[ -n "$GH_USER" ]]; then
-                CHANGELOG+="* ${subject} ([\`${SHORT_SHA}\`](${COMMIT_URL})) by @${GH_USER}\n"
+                CHANGELOG+="* Commit: ${subject} ([\`${SHORT_SHA}\`](${COMMIT_URL})) by @${GH_USER}\n"
                 CONTRIBUTORS+="${GH_USER}\n"
                 if [[ -n "$email" && "$email" != *"noreply.github.com"* ]]; then
                   CONTRIBUTOR_EMAILS=$(echo "$CONTRIBUTOR_EMAILS" | jq --arg user "$GH_USER" --arg email "$email" '. + {($user): $email}')
                 fi
               else
-                CHANGELOG+="* ${subject} ([\`${SHORT_SHA}\`](${COMMIT_URL})) by ${author}\n"
+                CHANGELOG+="* Commit: ${subject} ([\`${SHORT_SHA}\`](${COMMIT_URL})) by ${author}\n"
               fi
               echo "Commit $SHORT_SHA: git_author=$author, git_email=$email, gh_user=$GH_USER"
             fi
@@ -482,42 +493,15 @@ jobs:
             exit 0
           fi
 
-          # Slack silently splits messages over ~3000 chars, so we chunk at line boundaries
-          MAX_CHUNK=2800
-          CHUNK=""
-          CHUNK_NUM=0
+          PAYLOAD=$(jq -n \
+            --arg channel "$CHANNEL" \
+            --arg thread_ts "$THREAD_TS" \
+            --arg text "$SLACK_CHANGELOG" \
+            '{channel: $channel, thread_ts: $thread_ts, text: $text}')
 
-          while IFS= read -r line; do
-            if [[ $(( ${#CHUNK} + ${#line} + 1 )) -gt "$MAX_CHUNK" && -n "$CHUNK" ]]; then
-              CHUNK_NUM=$((CHUNK_NUM + 1))
-              PAYLOAD=$(jq -n \
-                --arg channel "$CHANNEL" \
-                --arg thread_ts "$THREAD_TS" \
-                --arg text "$CHUNK" \
-                '{channel: $channel, thread_ts: $thread_ts, text: $text}')
+          RESPONSE=$(curl -s -X POST "https://slack.com/api/chat.postMessage" \
+            -H "Authorization: Bearer $SLACK_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
 
-              RESPONSE=$(curl -s -X POST "https://slack.com/api/chat.postMessage" \
-                -H "Authorization: Bearer $SLACK_TOKEN" \
-                -H "Content-Type: application/json" \
-                -d "$PAYLOAD")
-              echo "Thread chunk $CHUNK_NUM (${#CHUNK} chars): $(echo "$RESPONSE" | jq -c '{ok: .ok, error: .error}')"
-              CHUNK=""
-            fi
-            CHUNK+="${line}"$'\n'
-          done <<< "$SLACK_CHANGELOG"
-
-          # Post remaining chunk
-          if [[ -n "$CHUNK" ]]; then
-            CHUNK_NUM=$((CHUNK_NUM + 1))
-            PAYLOAD=$(jq -n \
-              --arg channel "$CHANNEL" \
-              --arg thread_ts "$THREAD_TS" \
-              --arg text "$CHUNK" \
-              '{channel: $channel, thread_ts: $thread_ts, text: $text}')
-
-            RESPONSE=$(curl -s -X POST "https://slack.com/api/chat.postMessage" \
-              -H "Authorization: Bearer $SLACK_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d "$PAYLOAD")
-            echo "Thread chunk $CHUNK_NUM (${#CHUNK} chars): $(echo "$RESPONSE" | jq -c '{ok: .ok, error: .error}')"
-          fi
+          echo "Thread post result: $(echo "$RESPONSE" | jq -c '{ok: .ok, error: .error}')"
