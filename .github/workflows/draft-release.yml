@@ -218,8 +218,8 @@ jobs:
           else
             SINCE_DATE=$(git log --reverse --format=%aI | head -1)
           fi
+          echo "Range: $RANGE, Previous tag: $PREV_TAG, Since: $SINCE_DATE, Branch: $TARGET_BRANCH, Max entries: $MAX_ENTRIES"
 
-          # Fetch merged PRs since last tag, limited to max entries (include mergeCommit to deduplicate against commits section)
           PRS=$(gh pr list \
             --state merged \
             --base "$TARGET_BRANCH" \
@@ -231,6 +231,7 @@ jobs:
           PR_SHAS=$(echo "$PRS" | jq -r '.[].mergeCommit.oid // empty' 2>/dev/null | sort -u)
 
           PR_COUNT=$(echo "$PRS" | jq 'length')
+          echo "Found $PR_COUNT merged PRs"
 
           if [[ "$PR_COUNT" -gt 0 ]]; then
             CHANGELOG+="### Pull Requests\n\n"
@@ -248,8 +249,8 @@ jobs:
               CONTRIBUTORS+="${PR_AUTHOR}\n"
               ENTRY_COUNT=$((ENTRY_COUNT + 1))
 
-              # Resolve email from PR commits
               PR_MERGE_SHA=$(echo "$PRS" | jq -r ".[$i].mergeCommit.oid // empty")
+              PR_EMAIL=""
               if [[ -n "$PR_MERGE_SHA" ]]; then
                 PR_EMAIL=$(git log "${PR_MERGE_SHA}^1..${PR_MERGE_SHA}" --no-merges --format="%ae" 2>/dev/null \
                   | grep -v "noreply.github.com" | sort | uniq -c | sort -rn | head -1 | awk '{print $2}' || echo "")
@@ -257,6 +258,7 @@ jobs:
                   CONTRIBUTOR_EMAILS=$(echo "$CONTRIBUTOR_EMAILS" | jq --arg user "$PR_AUTHOR" --arg email "$PR_EMAIL" '. + {($user): $email}')
                 fi
               fi
+              echo "PR #${PR_NUM}: author=$PR_AUTHOR, merge_sha=$PR_MERGE_SHA, email=$PR_EMAIL"
             done
             CHANGELOG+="\n"
           fi
@@ -266,6 +268,8 @@ jobs:
             # Batch fetch commit authors from GitHub API (one call instead of per-commit)
             COMMIT_MAP=$(gh api "repos/${{ github.repository }}/commits?sha=${TARGET_BRANCH}&since=${SINCE_DATE}&per_page=${MAX_ENTRIES}" \
               --jq '[.[] | {key: .sha, value: (.author.login // "")}] | from_entries' 2>/dev/null || echo "{}")
+            COMMIT_MAP_SIZE=$(echo "$COMMIT_MAP" | jq 'length')
+            echo "Fetched $COMMIT_MAP_SIZE commits from GitHub API for author resolution"
 
             DIRECT_COMMITS=""
             if [[ "$RANGE" == "HEAD" ]]; then
@@ -289,6 +293,7 @@ jobs:
                 COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${sha}"
 
                 GH_USER=$(echo "$COMMIT_MAP" | jq -r --arg sha "$sha" '.[$sha] // empty')
+                echo "Commit $SHORT_SHA: git_author=$author, git_email=$email, gh_user=$GH_USER"
 
                 if [[ -n "$GH_USER" ]]; then
                   CHANGELOG+="* ${subject} ([\`${SHORT_SHA}\`](${COMMIT_URL})) by @${GH_USER}\n"
@@ -324,6 +329,9 @@ jobs:
           FULL_CHANGELOG="## What Changed\n\n${CHANGELOG}"
 
           # Write outputs
+          echo "Contributors: $UNIQUE_CONTRIBUTORS"
+          echo "Contributor emails: $CONTRIBUTOR_EMAILS"
+
           echo "contributors=$UNIQUE_CONTRIBUTORS" >> $GITHUB_OUTPUT
           echo "contributor_emails=$CONTRIBUTOR_EMAILS" >> $GITHUB_OUTPUT
 
@@ -384,6 +392,9 @@ jobs:
           CONTRIBUTORS="${{ needs.draft-release.outputs.contributors }}"
           EMAILS='${{ needs.draft-release.outputs.contributor_emails }}'
 
+          echo "Contributors received: $CONTRIBUTORS"
+          echo "Emails received: $EMAILS"
+
           MENTIONS=""
           for gh_user in $(echo "$CONTRIBUTORS" | tr ',' ' '); do
             if [[ -z "$gh_user" ]]; then continue; fi
@@ -392,8 +403,12 @@ jobs:
 
             EMAIL=$(echo "$EMAILS" | jq -r ".\"${gh_user}\" // empty" 2>/dev/null)
             if [[ -n "$EMAIL" && -n "$SLACK_TOKEN" ]]; then
-              SLACK_ID=$(curl -s -H "Authorization: Bearer $SLACK_TOKEN" \
-                "https://slack.com/api/users.lookupByEmail?email=${EMAIL}" | jq -r '.user.id // empty' 2>/dev/null)
+              LOOKUP_RESPONSE=$(curl -s -H "Authorization: Bearer $SLACK_TOKEN" \
+                "https://slack.com/api/users.lookupByEmail?email=${EMAIL}")
+              SLACK_ID=$(echo "$LOOKUP_RESPONSE" | jq -r '.user.id // empty' 2>/dev/null)
+              echo "Slack lookup for $gh_user: email=$EMAIL, ok=$(echo "$LOOKUP_RESPONSE" | jq -r '.ok'), slack_id=$SLACK_ID"
+            else
+              echo "Slack lookup for $gh_user: no email found"
             fi
 
             if [[ -n "$SLACK_ID" ]]; then
@@ -403,6 +418,7 @@ jobs:
             fi
           done
 
+          echo "Final mentions: $MENTIONS"
           echo "mentions=$MENTIONS" >> $GITHUB_OUTPUT
 
       - name: Send Slack notification
