@@ -266,10 +266,24 @@ jobs:
           # Get direct commits (not from merge commits / PRs)
           if [[ "$TRUNCATED" != "true" ]]; then
             # Batch fetch commit authors from GitHub API (one call instead of per-commit)
-            COMMIT_MAP=$(gh api "repos/${{ github.repository }}/commits?sha=${TARGET_BRANCH}&since=${SINCE_DATE}&per_page=${MAX_ENTRIES}" \
-              --jq '[.[] | {key: .sha, value: (.author.login // "")}] | from_entries' 2>/dev/null || echo "{}")
-            COMMIT_MAP_SIZE=$(echo "$COMMIT_MAP" | jq 'length')
-            echo "Fetched $COMMIT_MAP_SIZE commits from GitHub API for author resolution"
+            COMMIT_MAP="{}"
+            PAGE=1
+            MAX_PAGES=10
+            while [[ "$PAGE" -le "$MAX_PAGES" ]]; do
+              PAGE_RESULT=$(gh api "repos/${{ github.repository }}/commits?sha=${TARGET_BRANCH}&since=${SINCE_DATE}&per_page=100&page=${PAGE}" \
+                --jq '[.[] | {key: .sha, value: (.author.login // "")}] | from_entries' 2>/dev/null || echo "{}")
+              PAGE_SIZE=$(echo "$PAGE_RESULT" | jq 'length')
+              if [[ "$PAGE_SIZE" -eq 0 ]]; then break; fi
+              COMMIT_MAP=$(echo "$COMMIT_MAP" "$PAGE_RESULT" | jq -s 'add')
+              echo "Commit map page $PAGE: $PAGE_SIZE commits"
+              if [[ "$PAGE_SIZE" -lt 100 ]]; then break; fi
+              PAGE=$((PAGE + 1))
+            done
+            if [[ "$PAGE" -gt "$MAX_PAGES" ]]; then
+              echo "::error::Commit map pagination exceeded $MAX_PAGES pages (1000+ commits since last tag). Create a tag at the desired starting point to reduce the range."
+              exit 1
+            fi
+            echo "Commit map total: $(echo "$COMMIT_MAP" | jq 'length') commits"
 
             DIRECT_COMMITS=""
             if [[ "$RANGE" == "HEAD" ]]; then
@@ -409,7 +423,9 @@ jobs:
               LOOKUP_RESPONSE=$(curl -s -H "Authorization: Bearer $SLACK_TOKEN" \
                 "https://slack.com/api/users.lookupByEmail?email=${EMAIL}")
               SLACK_ID=$(echo "$LOOKUP_RESPONSE" | jq -r '.user.id // empty' 2>/dev/null)
-              echo "Slack lookup for $gh_user: email=$EMAIL, ok=$(echo "$LOOKUP_RESPONSE" | jq -r '.ok'), slack_id=$SLACK_ID"
+              SLACK_OK=$(echo "$LOOKUP_RESPONSE" | jq -r '.ok' 2>/dev/null)
+              SLACK_ERR=$(echo "$LOOKUP_RESPONSE" | jq -r '.error // empty' 2>/dev/null)
+              echo "Slack lookup for $gh_user: email=$EMAIL, ok=$SLACK_OK, error=$SLACK_ERR, slack_id=$SLACK_ID"
             else
               echo "Slack lookup for $gh_user: no email found"
             fi
@@ -461,17 +477,13 @@ jobs:
           SLACK_TOKEN: ${{ secrets.slack_bot_token || secrets.SLACK_BOT_TOKEN }}
           CHANGELOG: ${{ needs.draft-release.outputs.changelog }}
           CHANNEL: ${{ inputs.slack_channel }}
-          THREAD_TS: ${{ steps.slack-post.outputs.time }}
           SLACK_POST_OK: ${{ steps.slack-post.outputs.ok }}
           SLACK_POST_RESPONSE: ${{ steps.slack-post.outputs.response }}
         run: |
+          # Always extract ts from response (the 'time' output is Unix timestamp, not Slack ts format)
+          THREAD_TS=$(echo "$SLACK_POST_RESPONSE" | jq -r '.ts // empty' 2>/dev/null)
           echo "Slack post status: ok=$SLACK_POST_OK, thread_ts=$THREAD_TS"
           echo "Changelog: ${#CHANGELOG} characters"
-
-          if [[ -z "$THREAD_TS" ]]; then
-            THREAD_TS=$(echo "$SLACK_POST_RESPONSE" | jq -r '.ts // empty' 2>/dev/null)
-            echo "Extracted ts from response: $THREAD_TS"
-          fi
 
           if [[ -z "$THREAD_TS" ]]; then
             echo "No thread timestamp, skipping"
