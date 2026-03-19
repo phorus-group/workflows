@@ -190,10 +190,10 @@ jobs:
   unit-test:
     name: Unit tests
     needs: [build]
+    if: ${{ inputs.disable-unit-test != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        if: ${{ inputs.disable-unit-test != 'true' }}
         uses: actions/checkout@v4
 
       - name: Configure npm registry globally in ~/.npmrc to download dependencies from the same scope as the project
@@ -206,13 +206,11 @@ jobs:
           echo "always-auth=true" >> ~/.npmrc
 
       - name: Run unit-tests
-        if: ${{ inputs.disable-unit-test != 'true' }}
         uses: phorus-group/yarn-test-action@main
         with:
           command: test:unit
 
       - name: Run storybook tests
-        if: ${{ inputs.disable-unit-test != 'true' }}
         uses: phorus-group/yarn-test-action@main
         with:
           command: test:storybook:ci
@@ -220,10 +218,10 @@ jobs:
   integration-test:
     name: Integration tests
     needs: [build]
+    if: ${{ inputs.disable-integration-test != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        if: ${{ inputs.disable-integration-test != 'true' }}
         uses: actions/checkout@v4
 
       - name: Configure npm registry globally in ~/.npmrc to download dependencies from the same scope as the project
@@ -236,7 +234,6 @@ jobs:
           echo "always-auth=true" >> ~/.npmrc
 
       - name: Run integration-tests
-        if: ${{ inputs.disable-integration-test != 'true' }}
         uses: phorus-group/yarn-test-action@main
         with:
           command: test:integration
@@ -262,14 +259,13 @@ jobs:
   vulnerability-analysis:
     name: Vulnerability analysis
     needs: [build]
+    if: ${{ !inputs.disable-vulnerability-analysis }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        if: ${{ !inputs.disable-vulnerability-analysis }}
         uses: actions/checkout@v4
 
       - name: Analyse project for vulnerabilities
-        if: ${{ !inputs.disable-vulnerability-analysis }}
         uses: phorus-group/vulnerability-analysis-action@main
         with:
           skip-dirs: node_modules,.git
@@ -278,7 +274,7 @@ jobs:
   publish:
     name: Publish library
     needs: [validate-version,unit-test,integration-test,vulnerability-analysis]
-    if: ${{ github.ref_name == github.event.repository.default_branch && !inputs.disable-publish }}
+    if: ${{ !failure() && !cancelled() && github.ref_name == github.event.repository.default_branch && !inputs.disable-publish }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -313,7 +309,7 @@ jobs:
   enforce-all-checks:
     name: Enforce all checks
     needs: [validate-version,unit-test,integration-test,vulnerability-analysis]
-    if: ${{ github.ref_name != github.event.repository.default_branch }}
+    if: ${{ !failure() && !cancelled() && github.ref_name != github.event.repository.default_branch }}
     runs-on: ubuntu-latest
     permissions:
       checks: read

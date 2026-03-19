@@ -126,10 +126,10 @@ jobs:
   unit-test:
     name: Unit tests
     needs: [build]
+    if: ${{ inputs.disable-unit-test != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        if: ${{ inputs.disable-unit-test != 'true' }}
         uses: actions/checkout@v4
 
       - name: Configure npm registry globally in ~/.npmrc
@@ -140,13 +140,11 @@ jobs:
           echo "always-auth=true" >> ~/.npmrc
 
       - name: Run unit-tests
-        if: ${{ inputs.disable-unit-test != 'true' }}
         uses: phorus-group/yarn-test-action@main
         with:
           command: test:unit
 
       - name: Run storybook tests
-        if: ${{ inputs.disable-unit-test != 'true' }}
         uses: phorus-group/yarn-test-action@main
         with:
           command: test:storybook:ci
@@ -155,10 +153,10 @@ jobs:
     name: Integration tests
 
     needs: [build]
+    if: ${{ inputs.disable-integration-test != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        if: ${{ inputs.disable-integration-test != 'true' }}
         uses: actions/checkout@v4
 
       - name: Configure npm registry globally in ~/.npmrc
@@ -169,36 +167,30 @@ jobs:
           echo "always-auth=true" >> ~/.npmrc
 
       - name: Set up Node.js
-        if: ${{ inputs.disable-integration-test != 'true' }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version }}
           cache: 'yarn'
 
       - name: Install dependencies
-        if: ${{ inputs.disable-integration-test != 'true' }}
         run: yarn install --frozen-lockfile
 
       - name: Get Playwright version
-        if: ${{ inputs.disable-integration-test != 'true' }}
         id: playwright-version
         shell: bash
         run: echo "version=$(node -e "console.log(require('@playwright/test/package.json').version)")" >> $GITHUB_OUTPUT
 
       - name: Cache Playwright browsers
-        if: ${{ inputs.disable-integration-test != 'true' }}
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
 
       - name: Install Playwright browsers
-        if: ${{ inputs.disable-integration-test != 'true' }}
         shell: bash
         run: npx playwright install --with-deps
 
       - name: Run integration-tests
-        if: ${{ inputs.disable-integration-test != 'true' }}
         uses: phorus-group/yarn-test-action@main
         with:
           command: test:integration
@@ -224,14 +216,13 @@ jobs:
   vulnerability-analysis:
     name: Vulnerability analysis
     needs: [build]
+    if: ${{ !inputs.disable-vulnerability-analysis }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        if: ${{ !inputs.disable-vulnerability-analysis }}
         uses: actions/checkout@v4
 
       - name: Analyse project for vulnerabilities
-        if: ${{ !inputs.disable-vulnerability-analysis }}
         uses: phorus-group/vulnerability-analysis-action@main
         with:
           skip-dirs: node_modules,.git
@@ -240,7 +231,7 @@ jobs:
   docker:
     name: Docker build and push
     needs: [unit-test,integration-test,vulnerability-analysis]
-    if: ${{ !(inputs.disable-docker && github.ref_name == github.event.repository.default_branch) }}
+    if: ${{ !failure() && !cancelled() && !(inputs.disable-docker && github.ref_name == github.event.repository.default_branch) }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -264,7 +255,7 @@ jobs:
   enforce-all-checks:
     name: Enforce all checks
     needs: [docker]
-    if: ${{ github.ref_name != github.event.repository.default_branch }}
+    if: ${{ !failure() && !cancelled() && github.ref_name != github.event.repository.default_branch }}
     runs-on: ubuntu-latest
     permissions:
       checks: read

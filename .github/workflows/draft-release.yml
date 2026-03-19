@@ -362,7 +362,7 @@ jobs:
   slack-notification:
     name: Send Slack notification
     needs: [draft-release]
-    if: ${{ inputs.slack_channel != '' }}
+    if: ${{ !failure() && !cancelled() && inputs.slack_channel != '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Build Slack message with contributor mentions

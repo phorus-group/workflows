@@ -108,14 +108,13 @@ jobs:
   unit-test:
     name: Unit tests
     needs: [build]
+    if: ${{ inputs.disable-unit-test != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        if: ${{ inputs.disable-unit-test != 'true' }}
         uses: actions/checkout@v4
 
       - name: Run unit-tests
-        if: ${{ inputs.disable-unit-test != 'true' }}
         uses: phorus-group/gradle-test-action@main
         with:
           java-version: ${{ inputs.java-version }}
@@ -129,14 +128,13 @@ jobs:
   integration-test:
     name: Integration tests
     needs: [build]
+    if: ${{ inputs.disable-integration-test != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        if: ${{ inputs.disable-integration-test != 'true' }}
         uses: actions/checkout@v4
 
       - name: Run integration-tests
-        if: ${{ inputs.disable-integration-test != 'true' }}
         uses: phorus-group/gradle-test-action@main
         with:
           java-version: ${{ inputs.java-version }}
@@ -149,7 +147,7 @@ jobs:
 
   merge-test-reports:
     name: Merge test reports
-    if: ${{ inputs.disable-merge-test-reports != 'true' && inputs.disable-integration-test != 'true' && inputs.disable-unit-test != 'true' }}
+    if: ${{ !failure() && !cancelled() && inputs.disable-merge-test-reports != 'true' && inputs.disable-integration-test != 'true' && inputs.disable-unit-test != 'true' }}
     needs: [unit-test,integration-test]
     runs-on: ubuntu-latest
     steps:
@@ -186,20 +184,18 @@ jobs:
   vulnerability-analysis:
     name: Vulnerability analysis
     needs: [build]
+    if: ${{ !inputs.disable-vulnerability-analysis }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        if: ${{ !inputs.disable-vulnerability-analysis }}
         uses: actions/checkout@v4
 
       - name: Download build artifacts
-        if: ${{ !inputs.disable-vulnerability-analysis }}
         uses: actions/download-artifact@v4
         with:
           name: gradle-build
 
       - name: "Setup Java"
-        if: ${{ !inputs.disable-vulnerability-analysis }}
         uses: actions/setup-java@v4
         with:
           distribution: ${{ inputs.java-distribution }}
@@ -207,7 +203,6 @@ jobs:
           cache: gradle
 
       - name: "Generate gradle lockfile"
-        if: ${{ !inputs.disable-vulnerability-analysis }}
         run: |
           mkdir -p ~/.gradle
           echo "allprojects { dependencyLocking { lockAllConfigurations() } }" >> ~/.gradle/init.gradle
@@ -217,7 +212,6 @@ jobs:
           ORG_GRADLE_PROJECT_readPassword: ${{ secrets.read-auth-value || github.token }}
 
       - name: Analyse project for vulnerabilities
-        if: ${{ !inputs.disable-vulnerability-analysis }}
         uses: phorus-group/vulnerability-analysis-action@main
         with:
           skip-dirs: .git
@@ -226,7 +220,7 @@ jobs:
   docker:
     name: Docker build and push
     needs: [unit-test,integration-test,vulnerability-analysis]
-    if: ${{ !(inputs.disable-docker && github.ref_name == github.event.repository.default_branch) }}
+    if: ${{ !failure() && !cancelled() && !(inputs.disable-docker && github.ref_name == github.event.repository.default_branch) }}
     runs-on: ubuntu-latest
     steps:
       - name: Download build artifacts
@@ -246,7 +240,7 @@ jobs:
   enforce-all-checks:
     name: Enforce all checks
     needs: [docker]
-    if: ${{ github.ref_name != github.event.repository.default_branch }}
+    if: ${{ !failure() && !cancelled() && github.ref_name != github.event.repository.default_branch }}
     runs-on: ubuntu-latest
     permissions:
       checks: read
