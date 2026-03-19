@@ -244,10 +244,14 @@ jobs:
               CONTRIBUTORS+="${PR_AUTHOR}\n"
               ENTRY_COUNT=$((ENTRY_COUNT + 1))
 
-              # Try to resolve email from GitHub profile for Slack lookup
-              PR_EMAIL=$(gh api "/users/${PR_AUTHOR}" --jq '.email // empty' 2>/dev/null || echo "")
-              if [[ -n "$PR_EMAIL" ]]; then
-                CONTRIBUTOR_EMAILS=$(echo "$CONTRIBUTOR_EMAILS" | jq --arg user "$PR_AUTHOR" --arg email "$PR_EMAIL" '. + {($user): $email}')
+              # Resolve email from PR commits
+              PR_MERGE_SHA=$(echo "$PRS" | jq -r ".[$i].mergeCommit.oid // empty")
+              if [[ -n "$PR_MERGE_SHA" ]]; then
+                PR_EMAIL=$(git log "${PR_MERGE_SHA}^1..${PR_MERGE_SHA}" --no-merges --format="%ae" 2>/dev/null \
+                  | grep -v "noreply.github.com" | sort | uniq -c | sort -rn | head -1 | awk '{print $2}' || echo "")
+                if [[ -n "$PR_EMAIL" ]]; then
+                  CONTRIBUTOR_EMAILS=$(echo "$CONTRIBUTOR_EMAILS" | jq --arg user "$PR_AUTHOR" --arg email "$PR_EMAIL" '. + {($user): $email}')
+                fi
               fi
             done
             CHANGELOG+="\n"
@@ -373,27 +377,29 @@ jobs:
           CONTRIBUTORS="${{ needs.draft-release.outputs.contributors }}"
           EMAILS='${{ needs.draft-release.outputs.contributor_emails }}'
 
-          # Build contributor mentions via Slack email lookup
           MENTIONS=""
           for gh_user in $(echo "$CONTRIBUTORS" | tr ',' ' '); do
             if [[ -z "$gh_user" ]]; then continue; fi
+
+            SLACK_ID=""
 
             EMAIL=$(echo "$EMAILS" | jq -r ".\"${gh_user}\" // empty" 2>/dev/null)
             if [[ -n "$EMAIL" && -n "$SLACK_TOKEN" ]]; then
               SLACK_ID=$(curl -s -H "Authorization: Bearer $SLACK_TOKEN" \
                 "https://slack.com/api/users.lookupByEmail?email=${EMAIL}" | jq -r '.user.id // empty' 2>/dev/null)
-              if [[ -n "$SLACK_ID" ]]; then
-                MENTIONS+="<@${SLACK_ID}> "
-                continue
-              fi
             fi
 
-            MENTIONS+="${gh_user} "
+            if [[ -n "$SLACK_ID" ]]; then
+              MENTIONS+="<@${SLACK_ID}> "
+            else
+              MENTIONS+="<https://github.com/${gh_user}|${gh_user}> "
+            fi
           done
 
           echo "mentions=$MENTIONS" >> $GITHUB_OUTPUT
 
       - name: Send Slack notification
+        id: slack-post
         uses: slackapi/slack-github-action@v2.0.0
         with:
           method: chat.postMessage
@@ -423,3 +429,34 @@ jobs:
                       text: "View Release"
                     url: "${{ needs.draft-release.outputs.release_url }}"
                     style: "primary"
+
+      - name: Post changelog in thread
+        if: ${{ steps.slack-post.outputs.ok == 'true' && steps.slack-post.outputs.time != '' }}
+        env:
+          SLACK_TOKEN: ${{ secrets.slack_bot_token || secrets.SLACK_BOT_TOKEN }}
+          CHANGELOG: ${{ needs.draft-release.outputs.changelog }}
+          CHANNEL: ${{ inputs.slack_channel }}
+          THREAD_TS: ${{ steps.slack-post.outputs.time }}
+        run: |
+          if [[ -z "$CHANGELOG" ]]; then
+            echo "No changelog to post"
+            exit 0
+          fi
+
+          # Convert markdown headers to Slack bold and markdown links to Slack links
+          SLACK_TEXT=$(echo "$CHANGELOG" | \
+            sed 's/^## \(.*\)$/*\1*/g' | \
+            sed 's/^### \(.*\)$/*\1*/g' | \
+            sed 's/\[\([^]]*\)\](\([^)]*\))/<\2|\1>/g')
+
+          # Post changelog as thread reply with proper JSON escaping
+          PAYLOAD=$(jq -n \
+            --arg channel "$CHANNEL" \
+            --arg thread_ts "$THREAD_TS" \
+            --arg text "$SLACK_TEXT" \
+            '{channel: $channel, thread_ts: $thread_ts, text: $text}')
+
+          curl -s -X POST "https://slack.com/api/chat.postMessage" \
+            -H "Authorization: Bearer $SLACK_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD"
