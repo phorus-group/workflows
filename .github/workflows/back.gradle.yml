@@ -43,6 +43,11 @@ on:
         type: boolean
         required: false
         default: false
+      disable-docker:
+        description: "Disable the Docker build and push job"
+        type: boolean
+        required: false
+        default: false
       disable-merge-test-reports:
         description: "Disable merging the test reports"
         type: string
@@ -221,14 +226,17 @@ jobs:
   docker:
     name: Docker build and push
     needs: [unit-test,integration-test,vulnerability-analysis]
+    if: ${{ !(inputs.disable-docker && github.ref_name == github.event.repository.default_branch) }}
     runs-on: ubuntu-latest
     steps:
       - name: Download build artifacts
+        if: ${{ !inputs.disable-docker }}
         uses: actions/download-artifact@v4
         with:
           name: gradle-build
 
       - name: Build and push Docker image
+        if: ${{ !inputs.disable-docker }}
         uses: phorus-group/docker-action@main
         with:
           vulnerability-analysis: false # Disabled because almost every image that is not alpine has more than 10 vulnerabilities

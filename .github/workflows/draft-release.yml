@@ -1,0 +1,424 @@
+name: Reusable workflow to create a draft release with changelog and Slack notification
+
+on:
+  workflow_dispatch:
+    inputs:
+      versioning:
+        description: "Versioning strategy: 'calver' (auto-generated), 'gradle' (from build.gradle), or 'node' (from package.json)"
+        type: choice
+        options:
+          - calver
+          - gradle
+          - node
+        required: true
+        default: "calver"
+      java-version:
+        description: "Java version (gradle only)"
+        type: string
+        required: false
+        default: "21"
+      java-distribution:
+        description: "Java distribution (gradle only)"
+        type: string
+        required: false
+        default: "temurin"
+      target_branch:
+        description: "Target branch for the release"
+        type: string
+        required: false
+        default: "main"
+      slack_channel:
+        description: "Slack channel ID for notification (e.g. C012AB3CD)"
+        type: string
+        required: false
+        default: ""
+      max_changelog_entries:
+        description: "Maximum number of PRs and commits to include in the changelog"
+        type: number
+        required: false
+        default: 50
+  workflow_call:
+    inputs:
+      versioning:
+        description: "Versioning strategy: 'calver' (auto-generated), 'gradle' (from build.gradle), or 'node' (from package.json)"
+        type: string
+        required: true
+        default: "calver"
+      java-version:
+        description: "Java version (gradle only)"
+        type: string
+        required: false
+        default: "21"
+      java-distribution:
+        description: "Java distribution (gradle only)"
+        type: string
+        required: false
+        default: "temurin"
+      target_branch:
+        description: "Target branch for the release"
+        type: string
+        required: false
+        default: "main"
+      slack_channel:
+        description: "Slack channel ID for notification (e.g. C012AB3CD)"
+        type: string
+        required: false
+        default: ""
+      max_changelog_entries:
+        description: "Maximum number of PRs and commits to include in the changelog"
+        type: number
+        required: false
+        default: 50
+    secrets:
+      slack_bot_token:
+        description: "Slack Bot User OAuth Token (xoxb-...) for posting messages. Falls back to org/repo-level SLACK_BOT_TOKEN secret."
+        required: false
+    outputs:
+      release_id:
+        description: "The ID of the created draft release"
+        value: ${{ jobs.draft-release.outputs.release_id }}
+      release_url:
+        description: "The URL of the created draft release"
+        value: ${{ jobs.draft-release.outputs.release_url }}
+      tag_name:
+        description: "The tag name used for the release"
+        value: ${{ jobs.draft-release.outputs.tag_name }}
+      version:
+        description: "The version extracted from build files (gradle/node only)"
+        value: ${{ jobs.extract-version.outputs.version }}
+
+jobs:
+  extract-version:
+    name: Extract version from build files
+    if: ${{ inputs.versioning != 'calver' }}
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      package-name: ${{ steps.version.outputs.name }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_branch }}
+
+      - name: Setup Java
+        if: ${{ inputs.versioning == 'gradle' }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ inputs.java-distribution }}
+          java-version: ${{ inputs.java-version }}
+
+      - name: Extract version
+        id: version
+        run: |
+          if [[ "${{ inputs.versioning }}" == "gradle" ]]; then
+            VERSION=$(./gradlew properties --no-daemon --console=plain -q | grep "^version:" | awk '{print $2}')
+            NAME=$(./gradlew properties --no-daemon --console=plain -q | grep "^name:" | awk '{print $2}')
+          elif [[ "${{ inputs.versioning }}" == "node" ]]; then
+            VERSION=$(jq -r .version package.json)
+            NAME=$(jq -r .name package.json)
+          fi
+
+          if [[ -z "$VERSION" || "$VERSION" == "null" ]]; then
+            echo "::error::Could not extract version from build files"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+          echo "Extracted version: $VERSION (package: $NAME)"
+
+  draft-release:
+    name: Create draft release
+    needs: [extract-version]
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create-release.outputs.release_id }}
+      release_url: ${{ steps.create-release.outputs.release_url }}
+      tag_name: ${{ steps.resolve-tag.outputs.tag_name }}
+      changelog: ${{ steps.changelog.outputs.changelog }}
+      contributors: ${{ steps.changelog.outputs.contributors }}
+      contributor_emails: ${{ steps.changelog.outputs.contributor_emails }}
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.target_branch }}
+
+      - name: Resolve tag name
+        id: resolve-tag
+        run: |
+          if [[ "${{ inputs.versioning }}" == "calver" ]]; then
+            # CalVer: v<YYYY>.<MM>.<increment>-<short-sha>
+            YEAR=$(date +%Y)
+            MONTH=$(date +%-m)
+            SHORT_SHA=$(git rev-parse --short HEAD)
+            PREFIX="v${YEAR}.${MONTH}."
+
+            # Find the highest existing increment for this year.month
+            LATEST_INCREMENT=$(git tag -l "${PREFIX}*" | sed "s|^${PREFIX}||" | sed 's|-.*/||' | sed 's|-.*||' | sort -n | tail -1)
+
+            if [[ -z "$LATEST_INCREMENT" ]]; then
+              NEXT_INCREMENT=1
+            else
+              NEXT_INCREMENT=$((LATEST_INCREMENT + 1))
+            fi
+
+            TAG="${PREFIX}${NEXT_INCREMENT}-${SHORT_SHA}"
+          else
+            # SemVer from build files (gradle/node)
+            TAG="v${{ needs.extract-version.outputs.version }}"
+          fi
+
+          echo "tag_name=$TAG" >> $GITHUB_OUTPUT
+          echo "Resolved tag: $TAG"
+
+      - name: Get previous tag
+        id: prev-tag
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          echo "previous_tag=$PREV_TAG" >> $GITHUB_OUTPUT
+
+          if [[ -z "$PREV_TAG" ]]; then
+            echo "No previous tag found, will include all commits on ${{ inputs.target_branch }}"
+            echo "range=HEAD" >> $GITHUB_OUTPUT
+          else
+            echo "Previous tag: $PREV_TAG"
+            echo "range=${PREV_TAG}..HEAD" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate changelog
+        id: changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RANGE="${{ steps.prev-tag.outputs.range }}"
+          PREV_TAG="${{ steps.prev-tag.outputs.previous_tag }}"
+          TARGET_BRANCH="${{ inputs.target_branch }}"
+
+          CHANGELOG=""
+          CONTRIBUTORS=""
+          CONTRIBUTOR_EMAILS="{}"
+          MAX_ENTRIES=${{ inputs.max_changelog_entries }}
+          ENTRY_COUNT=0
+          TRUNCATED=false
+
+          # Determine the date range for PR lookup
+          if [[ -n "$PREV_TAG" ]]; then
+            SINCE_DATE=$(git log -1 --format=%aI "$PREV_TAG")
+          else
+            SINCE_DATE=$(git log --reverse --format=%aI | head -1)
+          fi
+
+          # Fetch merged PRs since last tag (include mergeCommit to deduplicate against commits section)
+          PRS=$(gh pr list \
+            --state merged \
+            --base "$TARGET_BRANCH" \
+            --json number,title,author,mergedAt,url,mergeCommit \
+            --jq "[.[] | select(.mergedAt >= \"$SINCE_DATE\")]" 2>/dev/null || echo "[]")
+
+          # Collect PR commit SHAs to skip in the commits section
+          PR_SHAS=$(echo "$PRS" | jq -r '.[].mergeCommit.oid // empty' 2>/dev/null | sort -u)
+
+          PR_COUNT=$(echo "$PRS" | jq 'length')
+
+          if [[ "$PR_COUNT" -gt 0 ]]; then
+            CHANGELOG+="### Pull Requests\n\n"
+            for i in $(seq 0 $((PR_COUNT - 1))); do
+              if [[ "$ENTRY_COUNT" -ge "$MAX_ENTRIES" ]]; then
+                TRUNCATED=true
+                break
+              fi
+
+              PR_NUM=$(echo "$PRS" | jq -r ".[$i].number")
+              PR_TITLE=$(echo "$PRS" | jq -r ".[$i].title")
+              PR_AUTHOR=$(echo "$PRS" | jq -r ".[$i].author.login")
+              PR_URL=$(echo "$PRS" | jq -r ".[$i].url")
+              CHANGELOG+="* ${PR_TITLE} ([#${PR_NUM}](${PR_URL})) by @${PR_AUTHOR}\n"
+              CONTRIBUTORS+="${PR_AUTHOR}\n"
+              ENTRY_COUNT=$((ENTRY_COUNT + 1))
+
+              # Try to resolve email from GitHub profile for Slack lookup
+              PR_EMAIL=$(gh api "/users/${PR_AUTHOR}" --jq '.email // empty' 2>/dev/null || echo "")
+              if [[ -n "$PR_EMAIL" ]]; then
+                CONTRIBUTOR_EMAILS=$(echo "$CONTRIBUTOR_EMAILS" | jq --arg user "$PR_AUTHOR" --arg email "$PR_EMAIL" '. + {($user): $email}')
+              fi
+            done
+            CHANGELOG+="\n"
+          fi
+
+          # Get direct commits (not from merge commits / PRs)
+          if [[ "$TRUNCATED" != "true" ]]; then
+            DIRECT_COMMITS=""
+            if [[ "$RANGE" == "HEAD" ]]; then
+              DIRECT_COMMITS=$(git log --first-parent --no-merges --format="%H|%s|%an|%ae" 2>/dev/null || echo "")
+            else
+              DIRECT_COMMITS=$(git log $RANGE --first-parent --no-merges --format="%H|%s|%an|%ae" 2>/dev/null || echo "")
+            fi
+
+            if [[ -n "$DIRECT_COMMITS" ]]; then
+              CHANGELOG+="### Commits\n\n"
+              while IFS='|' read -r sha subject author email; do
+                if [[ -z "$sha" ]]; then continue; fi
+                # Skip commits that are already listed as PR merge commits
+                if echo "$PR_SHAS" | grep -q "^${sha}$" 2>/dev/null; then continue; fi
+                if [[ "$ENTRY_COUNT" -ge "$MAX_ENTRIES" ]]; then
+                  TRUNCATED=true
+                  break
+                fi
+
+                SHORT_SHA=$(echo "$sha" | cut -c1-7)
+                COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${sha}"
+
+                # Try to resolve GitHub username from commit email
+                GH_USER=$(gh api "/search/users?q=${email}+in:email" --jq '.items[0].login' 2>/dev/null || echo "")
+
+                if [[ -n "$GH_USER" ]]; then
+                  CHANGELOG+="* ${subject} ([\`${SHORT_SHA}\`](${COMMIT_URL})) by @${GH_USER}\n"
+                  CONTRIBUTORS+="${GH_USER}\n"
+                  if [[ -n "$email" ]]; then
+                    CONTRIBUTOR_EMAILS=$(echo "$CONTRIBUTOR_EMAILS" | jq --arg user "$GH_USER" --arg email "$email" '. + {($user): $email}')
+                  fi
+                else
+                  CHANGELOG+="* ${subject} ([\`${SHORT_SHA}\`](${COMMIT_URL})) by ${author}\n"
+                fi
+                ENTRY_COUNT=$((ENTRY_COUNT + 1))
+              done <<< "$DIRECT_COMMITS"
+              CHANGELOG+="\n"
+            fi
+          fi
+
+          if [[ "$TRUNCATED" == "true" ]]; then
+            CHANGELOG+="\n> Changelog truncated to ${MAX_ENTRIES} entries. See the full commit history for all changes.\n"
+          fi
+
+          # Deduplicate contributors
+          UNIQUE_CONTRIBUTORS=$(echo -e "$CONTRIBUTORS" | sort -u | grep -v '^$' | tr '\n' ',' | sed 's/,$//')
+
+          if [[ -n "$UNIQUE_CONTRIBUTORS" ]]; then
+            CHANGELOG+="### Contributors\n\n"
+            for contributor in $(echo "$UNIQUE_CONTRIBUTORS" | tr ',' '\n'); do
+              CHANGELOG+="@${contributor} "
+            done
+            CHANGELOG+="\n"
+          fi
+
+          # Prepend header
+          FULL_CHANGELOG="## What Changed\n\n${CHANGELOG}"
+
+          # Write outputs
+          echo "contributors=$UNIQUE_CONTRIBUTORS" >> $GITHUB_OUTPUT
+          echo "contributor_emails=$CONTRIBUTOR_EMAILS" >> $GITHUB_OUTPUT
+
+          # Write changelog as multiline output
+          EOF_MARKER=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+          echo "changelog<<${EOF_MARKER}" >> $GITHUB_OUTPUT
+          echo -e "$FULL_CHANGELOG" >> $GITHUB_OUTPUT
+          echo "${EOF_MARKER}" >> $GITHUB_OUTPUT
+
+      - name: Create draft release
+        id: create-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.resolve-tag.outputs.tag_name }}"
+
+          RESULT=$(gh release create "$TAG" \
+            --title "$TAG" \
+            --target "${{ inputs.target_branch }}" \
+            --draft \
+            --notes "${{ steps.changelog.outputs.changelog }}")
+
+          # gh release create prints the release URL on success
+          echo "release_url=$RESULT" >> $GITHUB_OUTPUT
+
+          # Fetch the release ID via API
+          RELEASE_ID=$(gh api "repos/${{ github.repository }}/releases" \
+            --jq "[.[] | select(.tag_name == \"$TAG\" and .draft == true)][0].id" 2>/dev/null || echo "")
+          echo "release_id=$RELEASE_ID" >> $GITHUB_OUTPUT
+
+          echo "Draft release created: $RESULT"
+
+      - name: Release summary
+        run: |
+          echo "## Draft Release Created" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ inputs.versioning }}" != "calver" ]]; then
+            echo "- **Package:** ${{ needs.extract-version.outputs.package-name }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Version:** ${{ needs.extract-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "- **Tag:** ${{ steps.resolve-tag.outputs.tag_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Previous tag:** ${{ steps.prev-tag.outputs.previous_tag || 'none' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **URL:** ${{ steps.create-release.outputs.release_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.changelog.outputs.changelog }}" >> $GITHUB_STEP_SUMMARY
+
+  slack-notification:
+    name: Send Slack notification
+    needs: [draft-release]
+    if: ${{ inputs.slack_channel != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build Slack message with contributor mentions
+        id: slack-message
+        env:
+          SLACK_TOKEN: ${{ secrets.slack_bot_token || secrets.SLACK_BOT_TOKEN }}
+        run: |
+          CONTRIBUTORS="${{ needs.draft-release.outputs.contributors }}"
+          EMAILS='${{ needs.draft-release.outputs.contributor_emails }}'
+
+          # Build contributor mentions via Slack email lookup
+          MENTIONS=""
+          for gh_user in $(echo "$CONTRIBUTORS" | tr ',' ' '); do
+            if [[ -z "$gh_user" ]]; then continue; fi
+
+            EMAIL=$(echo "$EMAILS" | jq -r ".\"${gh_user}\" // empty" 2>/dev/null)
+            if [[ -n "$EMAIL" && -n "$SLACK_TOKEN" ]]; then
+              SLACK_ID=$(curl -s -H "Authorization: Bearer $SLACK_TOKEN" \
+                "https://slack.com/api/users.lookupByEmail?email=${EMAIL}" | jq -r '.user.id // empty' 2>/dev/null)
+              if [[ -n "$SLACK_ID" ]]; then
+                MENTIONS+="<@${SLACK_ID}> "
+                continue
+              fi
+            fi
+
+            MENTIONS+="${gh_user} "
+          done
+
+          echo "mentions=$MENTIONS" >> $GITHUB_OUTPUT
+
+      - name: Send Slack notification
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.slack_bot_token || secrets.SLACK_BOT_TOKEN }}
+          payload: |
+            channel: "${{ inputs.slack_channel }}"
+            text: "New Draft Release: ${{ needs.draft-release.outputs.tag_name }} for ${{ github.repository }}"
+            blocks:
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: "*New Draft Release:* <${{ needs.draft-release.outputs.release_url }}|${{ needs.draft-release.outputs.tag_name }}>"
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: "*Repository:* `${{ github.repository }}`"
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: "*Contributors:* ${{ steps.slack-message.outputs.mentions }}"
+              - type: "divider"
+              - type: "actions"
+                elements:
+                  - type: "button"
+                    text:
+                      type: "plain_text"
+                      text: "View Release"
+                    url: "${{ needs.draft-release.outputs.release_url }}"
+                    style: "primary"

@@ -42,6 +42,11 @@ on:
         type: boolean
         required: false
         default: false
+      disable-docker:
+        description: "Disable the Docker build and push job"
+        type: boolean
+        required: false
+        default: false
       gh-advanced-security:
         description: "Enable if you have GitHub Advanced Security"
         type: boolean
@@ -235,17 +240,21 @@ jobs:
   docker:
     name: Docker build and push
     needs: [unit-test,integration-test,vulnerability-analysis]
+    if: ${{ !(inputs.disable-docker && github.ref_name == github.event.repository.default_branch) }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
+        if: ${{ !inputs.disable-docker }}
         uses: actions/checkout@v4
 
       - name: Download build artifacts
+        if: ${{ !inputs.disable-docker }}
         uses: actions/download-artifact@v4
         with:
           name: nextjs-build
 
       - name: Build and push Docker image
+        if: ${{ !inputs.disable-docker }}
         uses: phorus-group/docker-action@main
         with:
           dockerfile-path: "dockerfiles/Dockerfile.nextjs"

@@ -33,6 +33,11 @@ on:
         type: string
         required: false
         default: "false"
+      disable-publish:
+        description: "Disable the library publish job"
+        type: boolean
+        required: false
+        default: false
       disable-vulnerability-analysis:
         description: "Disable vulnerability analysis job"
         type: boolean
@@ -273,7 +278,7 @@ jobs:
   publish:
     name: Publish library
     needs: [validate-version,unit-test,integration-test,vulnerability-analysis]
-    if: ${{ github.ref_name == github.event.repository.default_branch }}
+    if: ${{ github.ref_name == github.event.repository.default_branch && !inputs.disable-publish }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
