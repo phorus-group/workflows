@@ -333,7 +333,7 @@ jobs:
           echo "Contributor emails: $CONTRIBUTOR_EMAILS"
 
           echo "contributors=$UNIQUE_CONTRIBUTORS" >> $GITHUB_OUTPUT
-          echo "contributor_emails=$CONTRIBUTOR_EMAILS" >> $GITHUB_OUTPUT
+          echo "contributor_emails=$(echo "$CONTRIBUTOR_EMAILS" | jq -c .)" >> $GITHUB_OUTPUT
 
           # Write changelog as multiline output
           EOF_MARKER=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
