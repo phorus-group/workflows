@@ -345,6 +345,7 @@ jobs:
         id: create-release
         env:
           GH_TOKEN: ${{ github.token }}
+          CHANGELOG: ${{ steps.changelog.outputs.changelog }}
         run: |
           TAG="${{ steps.resolve-tag.outputs.tag_name }}"
 
@@ -352,7 +353,7 @@ jobs:
             --title "$TAG" \
             --target "${{ inputs.target_branch }}" \
             --draft \
-            --notes "${{ steps.changelog.outputs.changelog }}")
+            --notes "$CHANGELOG")
 
           # gh release create prints the release URL on success
           echo "release_url=$RESULT" >> $GITHUB_OUTPUT
@@ -365,6 +366,8 @@ jobs:
           echo "Draft release created: $RESULT"
 
       - name: Release summary
+        env:
+          CHANGELOG: ${{ steps.changelog.outputs.changelog }}
         run: |
           echo "## Draft Release Created" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -376,7 +379,7 @@ jobs:
           echo "- **Previous tag:** ${{ steps.prev-tag.outputs.previous_tag || 'none' }}" >> $GITHUB_STEP_SUMMARY
           echo "- **URL:** ${{ steps.create-release.outputs.release_url }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.changelog.outputs.changelog }}" >> $GITHUB_STEP_SUMMARY
+          echo "$CHANGELOG" >> $GITHUB_STEP_SUMMARY
 
   slack-notification:
     name: Send Slack notification
