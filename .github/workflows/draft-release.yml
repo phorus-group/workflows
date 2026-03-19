@@ -215,10 +215,11 @@ jobs:
             SINCE_DATE=$(git log --reverse --format=%aI | head -1)
           fi
 
-          # Fetch merged PRs since last tag (include mergeCommit to deduplicate against commits section)
+          # Fetch merged PRs since last tag, limited to max entries (include mergeCommit to deduplicate against commits section)
           PRS=$(gh pr list \
             --state merged \
             --base "$TARGET_BRANCH" \
+            --limit "$MAX_ENTRIES" \
             --json number,title,author,mergedAt,url,mergeCommit \
             --jq "[.[] | select(.mergedAt >= \"$SINCE_DATE\")]" 2>/dev/null || echo "[]")
 
