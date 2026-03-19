@@ -264,7 +264,7 @@ jobs:
           # Get direct commits (not from merge commits / PRs)
           if [[ "$TRUNCATED" != "true" ]]; then
             # Batch fetch commit authors from GitHub API (one call instead of per-commit)
-            COMMIT_MAP=$(gh api "repos/${{ github.repository }}/commits?sha=${TARGET_BRANCH}&since=${SINCE_DATE}&per_page=100" \
+            COMMIT_MAP=$(gh api "repos/${{ github.repository }}/commits?sha=${TARGET_BRANCH}&since=${SINCE_DATE}&per_page=${MAX_ENTRIES}" \
               --jq '[.[] | {key: .sha, value: (.author.login // "")}] | from_entries' 2>/dev/null || echo "{}")
 
             DIRECT_COMMITS=""
