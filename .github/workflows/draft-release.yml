@@ -205,6 +205,10 @@ jobs:
           CONTRIBUTORS=""
           CONTRIBUTOR_EMAILS="{}"
           MAX_ENTRIES=${{ inputs.max_changelog_entries }}
+          if [[ "$MAX_ENTRIES" -gt 100 ]]; then
+            echo "::error::max_changelog_entries cannot exceed 100 (GitHub API per_page limit)"
+            exit 1
+          fi
           ENTRY_COUNT=0
           TRUNCATED=false
 
@@ -259,6 +263,10 @@ jobs:
 
           # Get direct commits (not from merge commits / PRs)
           if [[ "$TRUNCATED" != "true" ]]; then
+            # Batch fetch commit authors from GitHub API (one call instead of per-commit)
+            COMMIT_MAP=$(gh api "repos/${{ github.repository }}/commits?sha=${TARGET_BRANCH}&since=${SINCE_DATE}&per_page=100" \
+              --jq '[.[] | {key: .sha, value: (.author.login // "")}] | from_entries' 2>/dev/null || echo "{}")
+
             DIRECT_COMMITS=""
             if [[ "$RANGE" == "HEAD" ]]; then
               DIRECT_COMMITS=$(git log --first-parent --no-merges --format="%H|%s|%an|%ae" 2>/dev/null || echo "")
@@ -280,13 +288,12 @@ jobs:
                 SHORT_SHA=$(echo "$sha" | cut -c1-7)
                 COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${sha}"
 
-                # Try to resolve GitHub username from commit email
-                GH_USER=$(gh api "/search/users?q=${email}+in:email" --jq '.items[0].login' 2>/dev/null || echo "")
+                GH_USER=$(echo "$COMMIT_MAP" | jq -r --arg sha "$sha" '.[$sha] // empty')
 
                 if [[ -n "$GH_USER" ]]; then
                   CHANGELOG+="* ${subject} ([\`${SHORT_SHA}\`](${COMMIT_URL})) by @${GH_USER}\n"
                   CONTRIBUTORS+="${GH_USER}\n"
-                  if [[ -n "$email" ]]; then
+                  if [[ -n "$email" && "$email" != *"noreply.github.com"* ]]; then
                     CONTRIBUTOR_EMAILS=$(echo "$CONTRIBUTOR_EMAILS" | jq --arg user "$GH_USER" --arg email "$email" '. + {($user): $email}')
                   fi
                 else
@@ -431,32 +438,46 @@ jobs:
                     style: "primary"
 
       - name: Post changelog in thread
-        if: ${{ steps.slack-post.outputs.ok == 'true' && steps.slack-post.outputs.time != '' }}
         env:
           SLACK_TOKEN: ${{ secrets.slack_bot_token || secrets.SLACK_BOT_TOKEN }}
           CHANGELOG: ${{ needs.draft-release.outputs.changelog }}
           CHANNEL: ${{ inputs.slack_channel }}
           THREAD_TS: ${{ steps.slack-post.outputs.time }}
+          SLACK_POST_OK: ${{ steps.slack-post.outputs.ok }}
+          SLACK_POST_RESPONSE: ${{ steps.slack-post.outputs.response }}
         run: |
-          if [[ -z "$CHANGELOG" ]]; then
-            echo "No changelog to post"
+          echo "Slack post status: ok=$SLACK_POST_OK, thread_ts=$THREAD_TS"
+          echo "Changelog: ${#CHANGELOG} characters"
+
+          if [[ -z "$THREAD_TS" ]]; then
+            THREAD_TS=$(echo "$SLACK_POST_RESPONSE" | jq -r '.ts // empty' 2>/dev/null)
+            echo "Extracted ts from response: $THREAD_TS"
+          fi
+
+          if [[ -z "$THREAD_TS" ]]; then
+            echo "No thread timestamp, skipping"
             exit 0
           fi
 
-          # Convert markdown headers to Slack bold and markdown links to Slack links
+          if [[ -z "$CHANGELOG" ]]; then
+            echo "No changelog, skipping"
+            exit 0
+          fi
+
           SLACK_TEXT=$(echo "$CHANGELOG" | \
             sed 's/^## \(.*\)$/*\1*/g' | \
             sed 's/^### \(.*\)$/*\1*/g' | \
             sed 's/\[\([^]]*\)\](\([^)]*\))/<\2|\1>/g')
 
-          # Post changelog as thread reply with proper JSON escaping
           PAYLOAD=$(jq -n \
             --arg channel "$CHANNEL" \
             --arg thread_ts "$THREAD_TS" \
             --arg text "$SLACK_TEXT" \
             '{channel: $channel, thread_ts: $thread_ts, text: $text}')
 
-          curl -s -X POST "https://slack.com/api/chat.postMessage" \
+          RESPONSE=$(curl -s -X POST "https://slack.com/api/chat.postMessage" \
             -H "Authorization: Bearer $SLACK_TOKEN" \
             -H "Content-Type: application/json" \
-            -d "$PAYLOAD"
+            -d "$PAYLOAD")
+
+          echo "Thread post result: $(echo "$RESPONSE" | jq -c '{ok: .ok, error: .error}')"
