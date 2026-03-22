@@ -1,0 +1,122 @@
+name: Reusable workflow to deploy a Docker image to AWS ECS
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: "Full image URI to deploy. Takes precedence over image-tag"
+        type: string
+        required: false
+        default: ""
+      image-tag:
+        description: "Image tag only. Will be combined with the container's current image repository from the existing task definition. Useful when ECS uses a registry proxy. Ignored if 'image' is provided"
+        type: string
+        required: false
+        default: ""
+      environment:
+        description: "GitHub Environment name. Used for approval gates and environment-specific secrets"
+        type: string
+        required: true
+      ecs-cluster:
+        description: "ECS cluster name or ARN"
+        type: string
+        required: true
+      ecs-service:
+        description: "ECS service name"
+        type: string
+        required: true
+      ecs-task-definition-family:
+        description: "ECS task definition family name"
+        type: string
+        required: true
+      ecs-container-name:
+        description: "Container name inside the ECS task definition to update"
+        type: string
+        required: true
+      aws-region:
+        description: "AWS region for ECS deployment"
+        type: string
+        required: false
+        default: "us-east-1"
+      aws-role-arn:
+        description: "AWS IAM role ARN for OIDC authentication. If not provided, falls back to access key credentials"
+        type: string
+        required: false
+        default: ""
+      wait-for-service-stability:
+        description: "Wait for the ECS service deployment to reach a steady state"
+        type: boolean
+        required: false
+        default: true
+      require-published-release:
+        description: "Require the current tag to be a published (non-draft) GitHub release before deploying. Use this to gate production deployments"
+        type: boolean
+        required: false
+        default: false
+    secrets:
+      aws-access-key-id:
+        description: "AWS access key ID (used if aws-role-arn is not provided)"
+        required: false
+      aws-secret-access-key:
+        description: "AWS secret access key (used if aws-role-arn is not provided)"
+        required: false
+
+jobs:
+  deploy:
+    name: Deploy to ECS (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Validate published release
+        if: ${{ inputs.require-published-release }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ github.ref_name }}"
+
+          if [[ "${{ github.ref_type }}" != "tag" ]]; then
+            echo "::error::require-published-release is enabled but the current ref is not a tag (ref: ${{ github.ref }})"
+            exit 1
+          fi
+
+          RELEASE_JSON=$(gh release view "$TAG" --repo "${{ github.repository }}" --json isDraft 2>/dev/null) || {
+            echo "::error::Tag $TAG does not correspond to a GitHub release. Only published releases can be deployed to this environment."
+            exit 1
+          }
+
+          IS_DRAFT=$(echo "$RELEASE_JSON" | jq -r '.isDraft')
+          if [[ "$IS_DRAFT" == "true" ]]; then
+            echo "::error::Release for tag $TAG is still a draft. Publish the release before deploying to this environment."
+            exit 1
+          fi
+
+          echo "Validated: tag $TAG is a published release"
+
+      - name: Configure AWS credentials (OIDC)
+        if: ${{ inputs.aws-role-arn != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.aws-role-arn }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Configure AWS credentials (access key)
+        if: ${{ inputs.aws-role-arn == '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.aws-access-key-id }}
+          aws-secret-access-key: ${{ secrets.aws-secret-access-key }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Deploy to ECS
+        uses: phorus-group/ecs-deploy-action@main
+        with:
+          task-definition-family: ${{ inputs.ecs-task-definition-family }}
+          container-name: ${{ inputs.ecs-container-name }}
+          image: ${{ inputs.image }}
+          image-tag: ${{ inputs.image-tag }}
+          cluster: ${{ inputs.ecs-cluster }}
+          service: ${{ inputs.ecs-service }}
+          wait-for-service-stability: ${{ inputs.wait-for-service-stability }}

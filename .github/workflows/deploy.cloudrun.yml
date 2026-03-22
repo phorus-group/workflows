@@ -1,0 +1,131 @@
+name: Reusable workflow to deploy a Docker image to Google Cloud Run
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: "Full image URI to deploy. Takes precedence over image-tag"
+        type: string
+        required: false
+        default: ""
+      image-tag:
+        description: "Image tag only. Will be combined with the current service's image repository. Useful when Cloud Run uses a different registry than GHCR. Ignored if 'image' is provided"
+        type: string
+        required: false
+        default: ""
+      environment:
+        description: "GitHub Environment name. Used for approval gates and environment-specific secrets"
+        type: string
+        required: true
+      cloudrun-service:
+        description: "Cloud Run service name"
+        type: string
+        required: true
+      cloudrun-region:
+        description: "Google Cloud region for the Cloud Run service"
+        type: string
+        required: false
+        default: "us-central1"
+      gcp-project-id:
+        description: "Google Cloud project ID"
+        type: string
+        required: true
+      gcp-workload-identity-provider:
+        description: "Workload Identity Federation provider. If not provided, falls back to service account key"
+        type: string
+        required: false
+        default: ""
+      gcp-service-account:
+        description: "Google Cloud service account email for Workload Identity Federation"
+        type: string
+        required: false
+        default: ""
+      env-vars:
+        description: "Environment variables to set on the service (KEY=VALUE format, comma or newline separated)"
+        type: string
+        required: false
+        default: ""
+      flags:
+        description: "Additional gcloud deploy flags"
+        type: string
+        required: false
+        default: ""
+      no-traffic:
+        description: "Deploy the new revision without routing traffic to it (useful for canary/gradual rollouts)"
+        type: boolean
+        required: false
+        default: false
+      tag:
+        description: "Traffic tag to assign to the newly-created revision"
+        type: string
+        required: false
+        default: ""
+      require-published-release:
+        description: "Require the current tag to be a published (non-draft) GitHub release before deploying. Use this to gate production deployments"
+        type: boolean
+        required: false
+        default: false
+    secrets:
+      gcp-credentials-json:
+        description: "Google Cloud service account key JSON (used if workload identity provider is not provided)"
+        required: false
+
+jobs:
+  deploy:
+    name: Deploy to Cloud Run (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Validate published release
+        if: ${{ inputs.require-published-release }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ github.ref_name }}"
+
+          if [[ "${{ github.ref_type }}" != "tag" ]]; then
+            echo "::error::require-published-release is enabled but the current ref is not a tag (ref: ${{ github.ref }})"
+            exit 1
+          fi
+
+          RELEASE_JSON=$(gh release view "$TAG" --repo "${{ github.repository }}" --json isDraft 2>/dev/null) || {
+            echo "::error::Tag $TAG does not correspond to a GitHub release. Only published releases can be deployed to this environment."
+            exit 1
+          }
+
+          IS_DRAFT=$(echo "$RELEASE_JSON" | jq -r '.isDraft')
+          if [[ "$IS_DRAFT" == "true" ]]; then
+            echo "::error::Release for tag $TAG is still a draft. Publish the release before deploying to this environment."
+            exit 1
+          fi
+
+          echo "Validated: tag $TAG is a published release"
+
+      - name: Authenticate to Google Cloud (Workload Identity Federation)
+        if: ${{ inputs.gcp-workload-identity-provider != '' }}
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ inputs.gcp-workload-identity-provider }}
+          service_account: ${{ inputs.gcp-service-account }}
+
+      - name: Authenticate to Google Cloud (Service Account Key)
+        if: ${{ inputs.gcp-workload-identity-provider == '' }}
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.gcp-credentials-json }}
+
+      - name: Deploy to Cloud Run
+        uses: phorus-group/cloudrun-deploy-action@main
+        with:
+          service: ${{ inputs.cloudrun-service }}
+          image: ${{ inputs.image }}
+          image-tag: ${{ inputs.image-tag }}
+          region: ${{ inputs.cloudrun-region }}
+          project-id: ${{ inputs.gcp-project-id }}
+          env-vars: ${{ inputs.env-vars }}
+          flags: ${{ inputs.flags }}
+          no-traffic: ${{ inputs.no-traffic }}
+          tag: ${{ inputs.tag }}
