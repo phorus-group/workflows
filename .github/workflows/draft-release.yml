@@ -71,7 +71,7 @@ on:
         default: 50
     secrets:
       slack_bot_token:
-        description: "Slack Bot User OAuth Token (xoxb-...). Required scopes: chat:write, users:read.email. See https://api.slack.com/apps. Falls back to org/repo-level SLACK_BOT_TOKEN secret."
+        description: "Slack Bot User OAuth Token (xoxb-...). Required scopes: chat:write, channels:history, groups:history, users:read.email. Falls back to org/repo-level SLACK_BOT_TOKEN secret."
         required: false
     outputs:
       release_id:

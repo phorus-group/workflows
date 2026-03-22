@@ -93,6 +93,11 @@ on:
         type: number
         required: false
         default: 0
+      slack-channel:
+        description: "Slack channel ID for release pipeline notifications. If empty, no notification is sent"
+        type: string
+        required: false
+        default: ""
     secrets:
       read-auth-value:
         description: "Auth value for reading dependencies and metadata. Default: github.token"
@@ -105,6 +110,9 @@ on:
         required: false
       signing-password:
         description: "GPG signing key password. Required if signing-key is provided"
+        required: false
+      slack-bot-token:
+        description: "Slack Bot User OAuth Token (xoxb-...). Required scopes: chat:write, channels:history, groups:history. Falls back to org/repo-level SLACK_BOT_TOKEN secret"
         required: false
     outputs:
       package-group:
@@ -381,6 +389,52 @@ jobs:
           echo "- **Group:** ${{ needs.validate-version.outputs.package-group }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Artifact:** ${{ needs.validate-version.outputs.package-name }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Version:** ${{ needs.validate-version.outputs.package-version }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Notify Slack
+        if: ${{ always() && inputs.slack-channel != '' }}
+        env:
+          SLACK_TOKEN: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
+          CHANNEL: ${{ inputs.slack-channel }}
+        run: |
+          if [[ -z "$SLACK_TOKEN" ]]; then
+            echo "No Slack token available, skipping notification"
+            exit 0
+          fi
+
+          TAG="${{ github.ref_name }}"
+          RELEASE_URL="${{ github.event.release.html_url || format('{0}/{1}/releases/tag/{2}', github.server_url, github.repository, github.ref_name) }}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          if [[ "${{ job.status }}" == "success" ]]; then
+            MESSAGE="*Release pipeline completed* for <${RELEASE_URL}|${TAG}> in \`${{ github.repository }}\`"
+          else
+            MESSAGE="*Release pipeline failed* for <${RELEASE_URL}|${TAG}> in \`${{ github.repository }}\` — <${RUN_URL}|view run>"
+          fi
+
+          # Try to find the draft-release message thread
+          THREAD_TS=""
+          HISTORY=$(curl -s -H "Authorization: Bearer $SLACK_TOKEN" \
+            "https://slack.com/api/conversations.history?channel=${CHANNEL}&limit=50" 2>/dev/null)
+
+          if [[ "$(echo "$HISTORY" | jq -r '.ok')" == "true" ]]; then
+            THREAD_TS=$(echo "$HISTORY" | jq -r --arg tag "$TAG" \
+              '[.messages[] | select(.text | contains($tag))][0].ts // empty')
+          fi
+
+          PAYLOAD=$(jq -n \
+            --arg channel "$CHANNEL" \
+            --arg text "$MESSAGE" \
+            --arg thread_ts "$THREAD_TS" \
+            'if $thread_ts == "" then {channel: $channel, text: $text, unfurl_links: false, unfurl_media: false}
+             else {channel: $channel, text: $text, thread_ts: $thread_ts, unfurl_links: false, unfurl_media: false}
+             end')
+
+          RESPONSE=$(curl -s -X POST "https://slack.com/api/chat.postMessage" \
+            -H "Authorization: Bearer $SLACK_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+
+          echo "Slack notification: $(echo "$RESPONSE" | jq -c '{ok: .ok, error: .error}')"
 
   enforce-all-checks:
     name: Enforce all checks
