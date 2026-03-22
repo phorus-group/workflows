@@ -343,7 +343,7 @@ jobs:
   publish:
     name: Publish library
     needs: [validate-version, unit-test, integration-test, vulnerability-analysis]
-    if: ${{ !failure() && !cancelled() && github.ref_name == github.event.repository.default_branch && !inputs.disable-publish }}
+    if: ${{ !failure() && !cancelled() && !inputs.disable-publish && (github.ref_name == github.event.repository.default_branch || (github.event_name == 'release' && github.event.action == 'published')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -385,7 +385,7 @@ jobs:
   enforce-all-checks:
     name: Enforce all checks
     needs: [validate-version, unit-test, integration-test, vulnerability-analysis]
-    if: ${{ !failure() && !cancelled() && github.ref_name != github.event.repository.default_branch }}
+    if: ${{ !failure() && !cancelled() && github.ref_name != github.event.repository.default_branch && github.event_name != 'release' }}
     runs-on: ubuntu-latest
     permissions:
       checks: read

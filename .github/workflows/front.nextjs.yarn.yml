@@ -85,6 +85,9 @@ on:
       image:
         description: "The Docker image reference (registry/repo:tag)"
         value: ${{ jobs.docker.outputs.image }}
+      image-tag:
+        description: "The Docker image tag only"
+        value: ${{ jobs.docker.outputs.image-tag }}
 
 jobs:
   build:
@@ -239,6 +242,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       image: ${{ steps.docker-push.outputs.image }}
+      image-tag: ${{ steps.docker-push.outputs.image-tag }}
     steps:
       - name: Checkout code
         if: ${{ !inputs.disable-docker }}
