@@ -17,6 +17,11 @@ on:
         description: "GitHub Environment name. Used for approval gates and environment-specific secrets"
         type: string
         required: true
+      environment-url:
+        description: "URL shown in the GitHub deployments view for this environment"
+        type: string
+        required: false
+        default: ""
       cloudrun-service:
         description: "Cloud Run service name"
         type: string
@@ -74,7 +79,9 @@ jobs:
   deploy:
     name: Deploy to Cloud Run (${{ inputs.environment }})
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ inputs.environment-url || null }}
     permissions:
       id-token: write
       contents: read
