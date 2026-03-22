@@ -429,12 +429,21 @@ jobs:
 
           if [[ "$HISTORY_OK" != "true" ]]; then
             echo "conversations.history error: $(echo "$HISTORY" | jq -r '.error // "unknown"')"
+            echo "Full error response: $(echo "$HISTORY" | jq -c '.')"
           else
-            echo "Messages found: $(echo "$HISTORY" | jq '.messages | length')"
-            echo "Searching for tag: $TAG"
+            MSG_COUNT=$(echo "$HISTORY" | jq '.messages | length')
+            echo "Messages found: $MSG_COUNT"
+            echo "Searching for tag: '$TAG'"
+            echo "--- Message texts (first 10) ---"
+            echo "$HISTORY" | jq -r '.messages[:10][] | "ts=\(.ts) subtype=\(.subtype // "none") text=\(.text[:120] // "NULL")"'
+            echo "--- End message texts ---"
             THREAD_TS=$(echo "$HISTORY" | jq -r --arg tag "$TAG" \
               '[.messages[] | select(.text | contains($tag))][0].ts // empty')
-            echo "Thread timestamp found: ${THREAD_TS:-none}"
+            echo "Thread timestamp found: '${THREAD_TS}'"
+            if [[ -z "$THREAD_TS" ]]; then
+              echo "No match found. Checking if any message text contains the tag at all:"
+              echo "$HISTORY" | jq --arg tag "$TAG" '[.messages[].text // "" | select(contains($tag))] | length'
+            fi
           fi
 
           PAYLOAD=$(jq -n \
