@@ -340,9 +340,17 @@ jobs:
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
           if [[ "${{ job.status }}" == "success" ]]; then
-            MESSAGE="*Release pipeline completed* for <${RELEASE_URL}|${TAG}> in \`${{ github.repository }}\`"
+            TEXT="Release pipeline completed for ${TAG} in ${{ github.repository }}"
+            BLOCK_TEXT="*Release pipeline completed* for <${RELEASE_URL}|${TAG}> in \`${{ github.repository }}\`"
+            BUTTON_TEXT="View Published Release"
+            BUTTON_URL="$RELEASE_URL"
+            BUTTON_STYLE="primary"
           else
-            MESSAGE="*Release pipeline failed* for <${RELEASE_URL}|${TAG}> in \`${{ github.repository }}\` — <${RUN_URL}|view run>"
+            TEXT="Release pipeline failed for ${TAG} in ${{ github.repository }}"
+            BLOCK_TEXT="*Release pipeline failed* for <${RELEASE_URL}|${TAG}> in \`${{ github.repository }}\`"
+            BUTTON_TEXT="View Run"
+            BUTTON_URL="$RUN_URL"
+            BUTTON_STYLE="danger"
           fi
 
           # Try to find the draft-release message thread
@@ -357,11 +365,18 @@ jobs:
 
           PAYLOAD=$(jq -n \
             --arg channel "$CHANNEL" \
-            --arg text "$MESSAGE" \
+            --arg text "$TEXT" \
+            --arg block_text "$BLOCK_TEXT" \
+            --arg button_text "$BUTTON_TEXT" \
+            --arg button_url "$BUTTON_URL" \
+            --arg button_style "$BUTTON_STYLE" \
             --arg thread_ts "$THREAD_TS" \
-            'if $thread_ts == "" then {channel: $channel, text: $text, unfurl_links: false, unfurl_media: false}
-             else {channel: $channel, text: $text, thread_ts: $thread_ts, unfurl_links: false, unfurl_media: false}
-             end')
+            '{channel: $channel, text: $text, unfurl_links: false, unfurl_media: false,
+              blocks: [
+                {type: "section", text: {type: "mrkdwn", text: $block_text}},
+                {type: "actions", elements: [{type: "button", text: {type: "plain_text", text: $button_text}, url: $button_url, style: $button_style}]}
+              ]}
+            + if $thread_ts != "" then {thread_ts: $thread_ts} else {} end')
 
           RESPONSE=$(curl -s -X POST "https://slack.com/api/chat.postMessage" \
             -H "Authorization: Bearer $SLACK_TOKEN" \
