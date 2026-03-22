@@ -424,9 +424,17 @@ jobs:
           HISTORY=$(curl -s -H "Authorization: Bearer $SLACK_TOKEN" \
             "https://slack.com/api/conversations.history?channel=${CHANNEL}&limit=50" 2>/dev/null)
 
-          if [[ "$(echo "$HISTORY" | jq -r '.ok')" == "true" ]]; then
+          HISTORY_OK=$(echo "$HISTORY" | jq -r '.ok')
+          echo "conversations.history ok: $HISTORY_OK"
+
+          if [[ "$HISTORY_OK" != "true" ]]; then
+            echo "conversations.history error: $(echo "$HISTORY" | jq -r '.error // "unknown"')"
+          else
+            echo "Messages found: $(echo "$HISTORY" | jq '.messages | length')"
+            echo "Searching for tag: $TAG"
             THREAD_TS=$(echo "$HISTORY" | jq -r --arg tag "$TAG" \
               '[.messages[] | select(.text | contains($tag))][0].ts // empty')
+            echo "Thread timestamp found: ${THREAD_TS:-none}"
           fi
 
           PAYLOAD=$(jq -n \
