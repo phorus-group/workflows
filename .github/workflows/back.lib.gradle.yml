@@ -39,7 +39,7 @@ on:
         required: false
         default: "https://maven.pkg.github.com"
       build-and-test:
-        description: "Build and test at the same time"
+        description: "Build and test in a single step. When true, unit-test, integration-test, and merge-test-reports jobs are skipped."
         type: boolean
         required: false
         default: false
@@ -60,6 +60,11 @@ on:
         default: false
       disable-vulnerability-analysis:
         description: "Disable vulnerability analysis job"
+        type: boolean
+        required: false
+        default: false
+      enable-codecov:
+        description: "Enable Codecov coverage upload"
         type: boolean
         required: false
         default: false
@@ -98,6 +103,11 @@ on:
         type: string
         required: false
         default: ""
+      slack-failure-channel:
+        description: "Slack channel ID for pipeline failure notifications. Falls back to slack-channel if empty."
+        type: string
+        required: false
+        default: ""
       publish-environment:
         description: "GitHub Environment for the publish job. Enables approval gates and environment-specific secrets. If empty, no environment is used"
         type: string
@@ -123,6 +133,9 @@ on:
         required: false
       slack-bot-token:
         description: "Slack Bot User OAuth Token (xoxb-...). Required scopes: chat:write, channels:history, groups:history. Falls back to org/repo-level SLACK_BOT_TOKEN secret"
+        required: false
+      codecov-token:
+        description: "Codecov token for private repos. Public repos can leave this empty."
         required: false
     outputs:
       package-group:
@@ -219,16 +232,16 @@ jobs:
           PACKAGE_GROUP=$(./gradlew properties --no-daemon --console=plain -q | grep "^group:" | awk '{print $2}')
           PACKAGE_VERSION=$(./gradlew properties --no-daemon --console=plain -q | grep "^version:" | awk '{print $2}')
           PACKAGE_NAME=$(./gradlew properties --no-daemon --console=plain -q | grep "^name:" | awk '{print $2}')
-          
+
           echo "Group: $PACKAGE_GROUP"
           echo "Version: $PACKAGE_VERSION"
           echo "Name: $PACKAGE_NAME"
-          
+
           if [[ -z "$PACKAGE_GROUP" || -z "$PACKAGE_VERSION" || -z "$PACKAGE_NAME" ]]; then
             echo "Error: Could not extract group, version, or name from Gradle properties."
             exit 1
           fi
-          
+
           echo "group=$PACKAGE_GROUP" >> $GITHUB_OUTPUT
           echo "version=$PACKAGE_VERSION" >> $GITHUB_OUTPUT
           echo "name=$PACKAGE_NAME" >> $GITHUB_OUTPUT
@@ -242,10 +255,10 @@ jobs:
           else
             METADATA_BASE_URL="${{ inputs.metadata-base-url }}"
           fi
-          
+
           GROUP_PATH=$(echo "${{ steps.package.outputs.group }}" | tr '.' '/')
           METADATA_URL="${METADATA_BASE_URL}/${GROUP_PATH}/${{ steps.package.outputs.name }}/maven-metadata.xml"
-          
+
           echo "Fetching metadata from: $METADATA_URL"
 
           if [[ "${{ inputs.metadata-auth-method }}" == "basic" ]]; then
@@ -255,14 +268,14 @@ jobs:
           else
             PUBLISHED_VERSION=$(curl -s "$METADATA_URL" | grep -oPm1 "<latest>[^<]+" | sed 's/<latest>//' || echo "")
           fi
-          
+
           if [[ -z "$PUBLISHED_VERSION" ]]; then
             echo "No published version found, using 0.0.0"
             PUBLISHED_VERSION="0.0.0"
           fi
-          
+
           echo "Extracted published version: $PUBLISHED_VERSION"
-          echo "version=$PUBLISHED_VERSION" >> $GITHUB_OUTPUT 
+          echo "version=$PUBLISHED_VERSION" >> $GITHUB_OUTPUT
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -278,7 +291,7 @@ jobs:
         run: |
           export PUBLISHED_VERSION=${{ steps.published.outputs.version }}
           export PACKAGE_VERSION=${{ steps.package.outputs.version }}
-          node -e ' 
+          node -e '
             const semver = require("semver");
             const current = process.env.PUBLISHED_VERSION || "0.0.0";
             const next = process.env.PACKAGE_VERSION;
@@ -309,6 +322,8 @@ jobs:
           java-version: ${{ inputs.java-version }}
           java-distribution: ${{ inputs.java-distribution }}
           build-and-test: ${{ inputs.build-and-test }}
+          enable-codecov: ${{ inputs.build-and-test && inputs.enable-codecov }}
+          codecov-token: ${{ secrets.codecov-token }}
         env:
           ORG_GRADLE_PROJECT_readUsername: ${{ inputs.registry-username || github.actor }}
           ORG_GRADLE_PROJECT_readPassword: ${{ secrets.read-auth-value || github.token }}
@@ -316,7 +331,7 @@ jobs:
   unit-test:
     name: Unit tests
     needs: [build]
-    if: ${{ inputs.disable-unit-test != 'true' }}
+    if: ${{ !inputs.build-and-test && inputs.disable-unit-test != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -329,6 +344,8 @@ jobs:
           java-distribution: ${{ inputs.java-distribution }}
           commands: check unitTest -x :test
           artifact-suffix: unit
+          enable-codecov: ${{ inputs.enable-codecov && inputs.disable-integration-test == 'true' }}
+          codecov-token: ${{ secrets.codecov-token }}
         env:
           ORG_GRADLE_PROJECT_readUsername: ${{ inputs.registry-username || github.actor }}
           ORG_GRADLE_PROJECT_readPassword: ${{ secrets.read-auth-value || github.token }}
@@ -336,7 +353,7 @@ jobs:
   integration-test:
     name: Integration tests
     needs: [build]
-    if: ${{ inputs.disable-integration-test != 'true' }}
+    if: ${{ !inputs.build-and-test && inputs.disable-integration-test != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -349,13 +366,15 @@ jobs:
           java-distribution: ${{ inputs.java-distribution }}
           commands: integrationTest
           artifact-suffix: integration
+          enable-codecov: ${{ inputs.enable-codecov && inputs.disable-unit-test == 'true' }}
+          codecov-token: ${{ secrets.codecov-token }}
         env:
           ORG_GRADLE_PROJECT_readUsername: ${{ inputs.registry-username || github.actor }}
           ORG_GRADLE_PROJECT_readPassword: ${{ secrets.read-auth-value || github.token }}
 
   merge-test-reports:
     name: Merge test reports
-    if: ${{ !failure() && !cancelled() && inputs.disable-merge-test-reports != 'true' && inputs.disable-integration-test != 'true' && inputs.disable-unit-test != 'true' }}
+    if: ${{ !failure() && !cancelled() && !inputs.build-and-test && inputs.disable-unit-test != 'true' && inputs.disable-integration-test != 'true' }}
     needs: [unit-test, integration-test]
     runs-on: ubuntu-latest
     steps:
@@ -370,6 +389,8 @@ jobs:
           command: jacocoMergeReports
           test-artifact-1: gradle-tests-unit
           test-artifact-2: gradle-tests-integration
+          enable-codecov: ${{ inputs.enable-codecov }}
+          codecov-token: ${{ secrets.codecov-token }}
 
   # This is giving us issues with GHA runners, so we are disabling it for now
   # code-quality:
@@ -550,3 +571,29 @@ jobs:
         with:
           token: ${{ github.token }}
           ignore_pattern: ".*Enforce all checks"
+
+  notify-failure:
+    name: Notify failure
+    needs: [build, unit-test, integration-test, vulnerability-analysis, publish, enforce-all-checks]
+    if: ${{ always() && failure() && (inputs.slack-failure-channel != '' || inputs.slack-channel != '') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Slack notification
+        env:
+          SLACK_TOKEN: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
+          CHANNEL: ${{ inputs.slack-failure-channel || inputs.slack-channel }}
+        run: |
+          if [[ -z "$SLACK_TOKEN" ]]; then exit 0; fi
+
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          REPO="${{ github.repository }}"
+
+          PAYLOAD=$(jq -n \
+            --arg channel "$CHANNEL" \
+            --arg text ":x: *Pipeline failed* in \`$REPO\` — <$RUN_URL|view run>" \
+            '{channel: $channel, text: $text, unfurl_links: false, unfurl_media: false}')
+
+          curl -s -X POST "https://slack.com/api/chat.postMessage" \
+            -H "Authorization: Bearer $SLACK_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" > /dev/null

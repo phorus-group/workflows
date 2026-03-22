@@ -78,6 +78,11 @@ on:
         type: string
         required: false
         default: ""
+      slack-failure-channel:
+        description: "Slack channel ID for pipeline failure notifications. Falls back to slack-channel if empty."
+        type: string
+        required: false
+        default: ""
       publish-environment:
         description: "GitHub Environment for the publish job. Enables approval gates and environment-specific secrets. If empty, no environment is used"
         type: string
@@ -88,6 +93,11 @@ on:
         type: string
         required: false
         default: ""
+      enable-codecov:
+        description: "Enable Codecov coverage upload"
+        type: boolean
+        required: false
+        default: false
     secrets:
       pub-auth-value:
         description: "Auth value to use inside ~/.npmrc for publishing. Defaults to github.token"
@@ -97,6 +107,9 @@ on:
         required: false
       slack-bot-token:
         description: "Slack Bot User OAuth Token (xoxb-...). Required scopes: chat:write, channels:history, groups:history. Falls back to org/repo-level SLACK_BOT_TOKEN secret"
+        required: false
+      codecov-token:
+        description: "Codecov token for private repos. Public repos can leave this empty."
         required: false
     outputs:
       package-name:
@@ -303,6 +316,9 @@ jobs:
         uses: phorus-group/yarn-test-action@main
         with:
           command: test:unit
+          test-label: Unit
+          enable-codecov: ${{ inputs.enable-codecov && inputs.disable-integration-test == 'true' }}
+          codecov-token: ${{ secrets.codecov-token }}
 
       - name: Run storybook tests
         uses: phorus-group/yarn-test-action@main
@@ -331,6 +347,9 @@ jobs:
         uses: phorus-group/yarn-test-action@main
         with:
           command: test:integration
+          test-label: Integration
+          enable-codecov: ${{ inputs.enable-codecov && inputs.disable-unit-test == 'true' }}
+          codecov-token: ${{ secrets.codecov-token }}
 
   # This is giving us issues with GHA runners, so we are disabling it for now
   # code-quality:
@@ -484,3 +503,29 @@ jobs:
         with:
           token: ${{ github.token }}
           ignore_pattern: ".*Enforce all checks"
+
+  notify-failure:
+    name: Notify failure
+    needs: [build, unit-test, integration-test, vulnerability-analysis, publish, enforce-all-checks]
+    if: ${{ always() && failure() && (inputs.slack-failure-channel != '' || inputs.slack-channel != '') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Slack notification
+        env:
+          SLACK_TOKEN: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
+          CHANNEL: ${{ inputs.slack-failure-channel || inputs.slack-channel }}
+        run: |
+          if [[ -z "$SLACK_TOKEN" ]]; then exit 0; fi
+
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          REPO="${{ github.repository }}"
+
+          PAYLOAD=$(jq -n \
+            --arg channel "$CHANNEL" \
+            --arg text ":x: *Pipeline failed* in \`$REPO\` — <$RUN_URL|view run>" \
+            '{channel: $channel, text: $text, unfurl_links: false, unfurl_media: false}')
+
+          curl -s -X POST "https://slack.com/api/chat.postMessage" \
+            -H "Authorization: Bearer $SLACK_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" > /dev/null

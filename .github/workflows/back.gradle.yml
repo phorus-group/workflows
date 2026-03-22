@@ -24,7 +24,7 @@ on:
         required: false
         default: "https://maven.pkg.github.com"
       build-and-test:
-        description: "Build and test at the same time"
+        description: "Build and test in a single step. When true, unit-test, integration-test, and merge-test-reports jobs are skipped."
         type: boolean
         required: false
         default: false
@@ -53,6 +53,16 @@ on:
         type: string
         required: false
         default: "false"
+      enable-codecov:
+        description: "Enable Codecov coverage upload"
+        type: boolean
+        required: false
+        default: false
+      slack-channel:
+        description: "Slack channel ID for failure notifications. If empty, no notification is sent"
+        type: string
+        required: false
+        default: ""
       gh-advanced-security:
         description: "Enable if you have GitHub Advanced Security"
         type: boolean
@@ -87,6 +97,12 @@ on:
       read-auth-value:
         description: "Auth value for reading dependencies. Default: github.token"
         required: false
+      codecov-token:
+        description: "Codecov token for private repos. Public repos can leave this empty."
+        required: false
+      slack-bot-token:
+        description: "Slack Bot User OAuth Token (xoxb-...)"
+        required: false
     outputs:
       image:
         description: "The Docker image reference (registry/repo:tag)"
@@ -108,6 +124,8 @@ jobs:
           java-version: ${{ inputs.java-version }}
           java-distribution: ${{ inputs.java-distribution }}
           build-and-test: ${{ inputs.build-and-test }}
+          enable-codecov: ${{ inputs.build-and-test && inputs.enable-codecov }}
+          codecov-token: ${{ secrets.codecov-token }}
         env:
           ORG_GRADLE_PROJECT_readUsername: ${{ inputs.registry-username || github.actor }}
           ORG_GRADLE_PROJECT_readPassword: ${{ secrets.read-auth-value || github.token }}
@@ -115,7 +133,7 @@ jobs:
   unit-test:
     name: Unit tests
     needs: [build]
-    if: ${{ inputs.disable-unit-test != 'true' }}
+    if: ${{ !inputs.build-and-test && inputs.disable-unit-test != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -128,6 +146,8 @@ jobs:
           java-distribution: ${{ inputs.java-distribution }}
           commands: check unitTest -x :test
           artifact-suffix: unit
+          enable-codecov: ${{ inputs.enable-codecov && inputs.disable-integration-test == 'true' }}
+          codecov-token: ${{ secrets.codecov-token }}
         env:
           ORG_GRADLE_PROJECT_readUsername: ${{ inputs.registry-username || github.actor }}
           ORG_GRADLE_PROJECT_readPassword: ${{ secrets.read-auth-value || github.token }}
@@ -135,7 +155,7 @@ jobs:
   integration-test:
     name: Integration tests
     needs: [build]
-    if: ${{ inputs.disable-integration-test != 'true' }}
+    if: ${{ !inputs.build-and-test && inputs.disable-integration-test != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -148,14 +168,16 @@ jobs:
           java-distribution: ${{ inputs.java-distribution }}
           commands: integrationTest
           artifact-suffix: integration
+          enable-codecov: ${{ inputs.enable-codecov && inputs.disable-unit-test == 'true' }}
+          codecov-token: ${{ secrets.codecov-token }}
         env:
           ORG_GRADLE_PROJECT_readUsername: ${{ inputs.registry-username || github.actor }}
           ORG_GRADLE_PROJECT_readPassword: ${{ secrets.read-auth-value || github.token }}
 
   merge-test-reports:
     name: Merge test reports
-    if: ${{ !failure() && !cancelled() && inputs.disable-merge-test-reports != 'true' && inputs.disable-integration-test != 'true' && inputs.disable-unit-test != 'true' }}
-    needs: [unit-test,integration-test]
+    if: ${{ !failure() && !cancelled() && !inputs.build-and-test && inputs.disable-merge-test-reports != 'true' && inputs.disable-integration-test != 'true' && inputs.disable-unit-test != 'true' }}
+    needs: [unit-test, integration-test]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -169,6 +191,8 @@ jobs:
           command: jacocoMergeReports
           test-artifact-1: gradle-tests-unit
           test-artifact-2: gradle-tests-integration
+          enable-codecov: ${{ inputs.enable-codecov }}
+          codecov-token: ${{ secrets.codecov-token }}
 
   # This is giving us issues with GHA runners, so we are disabling it for now
   # code-quality:
@@ -226,7 +250,7 @@ jobs:
 
   docker:
     name: Docker build and push
-    needs: [unit-test,integration-test,vulnerability-analysis]
+    needs: [unit-test, integration-test, vulnerability-analysis]
     if: ${{ !failure() && !cancelled() && !(inputs.disable-docker && github.ref_name == github.event.repository.default_branch) }}
     runs-on: ubuntu-latest
     outputs:
@@ -261,3 +285,29 @@ jobs:
         with:
           token: ${{ github.token }}
           ignore_pattern: ".*Enforce all checks"
+
+  notify-failure:
+    name: Notify failure
+    needs: [build, unit-test, integration-test, vulnerability-analysis, docker, enforce-all-checks]
+    if: ${{ always() && failure() && inputs.slack-channel != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Slack notification
+        env:
+          SLACK_TOKEN: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
+          CHANNEL: ${{ inputs.slack-channel }}
+        run: |
+          if [[ -z "$SLACK_TOKEN" ]]; then exit 0; fi
+
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          REPO="${{ github.repository }}"
+
+          PAYLOAD=$(jq -n \
+            --arg channel "$CHANNEL" \
+            --arg text ":x: *Pipeline failed* in \`$REPO\` — <$RUN_URL|view run>" \
+            '{channel: $channel, text: $text, unfurl_links: false, unfurl_media: false}')
+
+          curl -s -X POST "https://slack.com/api/chat.postMessage" \
+            -H "Authorization: Bearer $SLACK_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" > /dev/null
