@@ -98,13 +98,13 @@ on:
         type: number
         required: false
         default: 0
-      slack-channel:
+      slack-releases-channel:
         description: "Slack channel ID for release pipeline notifications. If empty, no notification is sent"
         type: string
         required: false
         default: ""
       slack-failure-channel:
-        description: "Slack channel ID for pipeline failure notifications. Falls back to slack-channel if empty."
+        description: "Slack channel ID for pipeline failure notifications. Pipeline failure notifications."
         type: string
         required: false
         default: ""
@@ -151,7 +151,7 @@ on:
 jobs:
   slack-release-start:
     name: Notify release started
-    if: ${{ inputs.slack-channel != '' && github.event_name == 'release' && github.event.action == 'published' }}
+    if: ${{ inputs.slack-releases-channel != '' && github.event_name == 'release' && github.event.action == 'published' }}
     runs-on: ubuntu-latest
     outputs:
       thread-ts: ${{ steps.status.outputs.thread_ts }}
@@ -160,7 +160,7 @@ jobs:
         id: status
         env:
           SLACK_TOKEN: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
-          CHANNEL: ${{ inputs.slack-channel }}
+          CHANNEL: ${{ inputs.slack-releases-channel }}
         run: |
           if [[ -z "$SLACK_TOKEN" ]]; then
             echo "No Slack token, skipping"
@@ -499,7 +499,7 @@ jobs:
       - name: Update draft message with final status
         env:
           SLACK_TOKEN: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
-          CHANNEL: ${{ inputs.slack-channel }}
+          CHANNEL: ${{ inputs.slack-releases-channel }}
           THREAD_TS: ${{ needs.slack-release-start.outputs.thread-ts }}
         run: |
           TAG="${{ github.ref_name }}"
@@ -575,13 +575,13 @@ jobs:
   notify-failure:
     name: Notify failure
     needs: [build, unit-test, integration-test, vulnerability-analysis, publish, enforce-all-checks]
-    if: ${{ always() && failure() && (inputs.slack-failure-channel != '' || inputs.slack-channel != '') }}
+    if: ${{ always() && failure() && (inputs.slack-failure-channel != '') }}
     runs-on: ubuntu-latest
     steps:
       - name: Send Slack notification
         env:
           SLACK_TOKEN: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
-          CHANNEL: ${{ inputs.slack-failure-channel || inputs.slack-channel }}
+          CHANNEL: ${{ inputs.slack-failure-channel }}
         run: |
           if [[ -z "$SLACK_TOKEN" ]]; then exit 0; fi
 

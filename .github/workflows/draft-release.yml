@@ -27,7 +27,7 @@ on:
         type: string
         required: false
         default: "main"
-      slack-channel:
+      slack-releases-channel:
         description: "Slack channel ID for notification"
         type: string
         required: false
@@ -59,7 +59,7 @@ on:
         type: string
         required: false
         default: "main"
-      slack-channel:
+      slack-releases-channel:
         description: "Slack channel ID for notification"
         type: string
         required: false
@@ -367,7 +367,7 @@ jobs:
   slack-notification:
     name: Send Slack notification
     needs: [draft-release]
-    if: ${{ !failure() && !cancelled() && inputs.slack-channel != '' }}
+    if: ${{ !failure() && !cancelled() && inputs.slack-releases-channel != '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Build Slack message with contributor mentions
@@ -439,7 +439,7 @@ jobs:
           method: chat.postMessage
           token: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
           payload: |
-            channel: "${{ inputs.slack-channel }}"
+            channel: "${{ inputs.slack-releases-channel }}"
             unfurl_links: false
             unfurl_media: false
             text: "New Draft Release: ${{ needs.draft-release.outputs.tag-name }} for ${{ github.repository }}"
@@ -470,7 +470,7 @@ jobs:
         env:
           SLACK_TOKEN: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANGELOG: ${{ steps.slack-message.outputs.slack_changelog }}
-          CHANNEL: ${{ inputs.slack-channel }}
+          CHANNEL: ${{ inputs.slack-releases-channel }}
           SLACK_POST_RESPONSE: ${{ steps.slack-post.outputs.response }}
         run: |
           THREAD_TS=$(echo "$SLACK_POST_RESPONSE" | jq -r '.ts // empty' 2>/dev/null)

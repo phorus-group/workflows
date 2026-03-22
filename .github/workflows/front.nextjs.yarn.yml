@@ -82,7 +82,7 @@ on:
         type: boolean
         required: false
         default: false
-      slack-channel:
+      slack-failure-channel:
         description: "Slack channel ID for failure notifications. If empty, no notification is sent"
         type: string
         required: false
@@ -302,13 +302,13 @@ jobs:
   notify-failure:
     name: Notify failure
     needs: [build, unit-test, integration-test, vulnerability-analysis, docker, enforce-all-checks]
-    if: ${{ always() && failure() && inputs.slack-channel != '' }}
+    if: ${{ always() && failure() && inputs.slack-failure-channel != '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Send Slack notification
         env:
           SLACK_TOKEN: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
-          CHANNEL: ${{ inputs.slack-channel }}
+          CHANNEL: ${{ inputs.slack-failure-channel }}
         run: |
           if [[ -z "$SLACK_TOKEN" ]]; then exit 0; fi
 
