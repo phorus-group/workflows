@@ -144,6 +144,13 @@ jobs:
       contents: write
       pull-requests: read
     steps:
+      - name: Validate target branch
+        run: |
+          if [[ "${{ inputs.target_branch }}" != "${{ github.event.repository.default_branch }}" ]]; then
+            echo "::error::Draft releases can only target the default branch (${{ github.event.repository.default_branch }})"
+            exit 1
+          fi
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:

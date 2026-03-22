@@ -80,6 +80,16 @@ on:
       read-auth-value:
         description: "Auth value to use inside ~/.npmrc for reading. Defaults to secrets.PACKAGES_READ" # Remember that the github.token only has access to the current repo packages
         required: false
+    outputs:
+      package-name:
+        description: "The npm package name"
+        value: ${{ jobs.validate-version.outputs.package-name }}
+      package-scope:
+        description: "The npm package scope"
+        value: ${{ jobs.validate-version.outputs.package-scope }}
+      package-version:
+        description: "The package version"
+        value: ${{ jobs.validate-version.outputs.package-version }}
 
 jobs:
   validate-version:

@@ -81,6 +81,10 @@ on:
       auth-value:
         description: "Auth value to use inside ~/.npmrc. Defaults to secrets.PACKAGES_READ" # Remember that the github.token only has access to the current repo packages
         required: false
+    outputs:
+      image:
+        description: "The Docker image reference (registry/repo:tag)"
+        value: ${{ jobs.docker.outputs.image }}
 
 jobs:
   build:
@@ -233,6 +237,8 @@ jobs:
     needs: [unit-test,integration-test,vulnerability-analysis]
     if: ${{ !failure() && !cancelled() && !(inputs.disable-docker && github.ref_name == github.event.repository.default_branch) }}
     runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.docker-push.outputs.image }}
     steps:
       - name: Checkout code
         if: ${{ !inputs.disable-docker }}
@@ -245,6 +251,7 @@ jobs:
           name: nextjs-build
 
       - name: Build and push Docker image
+        id: docker-push
         if: ${{ !inputs.disable-docker }}
         uses: phorus-group/docker-action@main
         with:

@@ -106,6 +106,16 @@ on:
       signing-password:
         description: "GPG signing key password. Required if signing-key is provided"
         required: false
+    outputs:
+      package-group:
+        description: "The Maven group ID"
+        value: ${{ jobs.validate-version.outputs.package-group }}
+      package-name:
+        description: "The artifact name"
+        value: ${{ jobs.validate-version.outputs.package-name }}
+      package-version:
+        description: "The package version"
+        value: ${{ jobs.validate-version.outputs.package-version }}
 
 jobs:
   validate-version:

@@ -87,6 +87,10 @@ on:
       read-auth-value:
         description: "Auth value for reading dependencies. Default: github.token"
         required: false
+    outputs:
+      image:
+        description: "The Docker image reference (registry/repo:tag)"
+        value: ${{ jobs.docker.outputs.image }}
 
 jobs:
   build:
@@ -222,6 +226,8 @@ jobs:
     needs: [unit-test,integration-test,vulnerability-analysis]
     if: ${{ !failure() && !cancelled() && !(inputs.disable-docker && github.ref_name == github.event.repository.default_branch) }}
     runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.docker-push.outputs.image }}
     steps:
       - name: Download build artifacts
         if: ${{ !inputs.disable-docker }}
@@ -230,6 +236,7 @@ jobs:
           name: gradle-build
 
       - name: Build and push Docker image
+        id: docker-push
         if: ${{ !inputs.disable-docker }}
         uses: phorus-group/docker-action@main
         with:
