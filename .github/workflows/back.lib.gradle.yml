@@ -310,55 +310,11 @@ jobs:
     if: ${{ inputs.slack-failure-channel != '' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Update previous failure message to running
-        env:
-          SLACK_TOKEN: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
-          CHANNEL: ${{ inputs.slack-failure-channel }}
-        run: |
-          if [[ -z "$SLACK_TOKEN" ]]; then exit 0; fi
-
-          REPO="${{ github.repository }}"
-          REF="${{ github.ref_name }}"
-          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          SEARCH_TEXT=":x: *Pipeline failed* in \`${REPO}\` on \`${REF}\`"
-
-          HISTORY=$(curl -s -H "Authorization: Bearer $SLACK_TOKEN" \
-            "https://slack.com/api/conversations.history?channel=${CHANNEL}&limit=20")
-
-          echo "Searching for previous failure message for $REPO on $REF..."
-
-          if [[ "$(echo "$HISTORY" | jq -r '.ok')" != "true" ]]; then
-            echo "Could not read channel history"
-            exit 0
-          fi
-
-          FAILURE_MSG=$(echo "$HISTORY" | jq --arg search "$SEARCH_TEXT" \
-            '[.messages[] | select(.blocks != null) | select(.blocks[].text.text? // "" | contains($search))][0] // empty')
-
-          if [[ -z "$FAILURE_MSG" || "$FAILURE_MSG" == "null" ]]; then
-            echo "No previous failure message found, skipping"
-            exit 0
-          fi
-
-          echo "Found previous failure message, updating to running..."
-          FAILURE_TS=$(echo "$FAILURE_MSG" | jq -r '.ts')
-          FAILED_URL=$(echo "$FAILURE_MSG" | jq -r '[.blocks[] | select(.type == "actions") | .elements[] | select(.text.text == "View Failed Run" or .text.text == "View Latest Failed Run") | .url][0] // empty')
-
-          UPDATED_BLOCKS=$(jq -n --arg repo "$REPO" --arg ref "$REF" --arg failed_url "$FAILED_URL" --arg new_url "$RUN_URL" '[
-            {type: "section", text: {type: "mrkdwn", text: (":x: *Pipeline failed* in `" + $repo + "` on `" + $ref + "`")}},
-            {type: "actions", elements: [
-              {type: "button", text: {type: "plain_text", text: "View Failed Run"}, url: $failed_url, style: "danger"},
-              {type: "button", text: {type: "plain_text", text: "View New Run"}, url: $new_url}
-            ]},
-            {type: "context", elements: [{type: "mrkdwn", text: ":hourglass_flowing_sand: Pipeline running again..."}]}
-          ]')
-
-          curl -s -X POST "https://slack.com/api/chat.update" \
-            -H "Authorization: Bearer $SLACK_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n --arg channel "$CHANNEL" --arg ts "$FAILURE_TS" --argjson blocks "$UPDATED_BLOCKS" \
-              '{channel: $channel, ts: $ts, blocks: $blocks}')" > /dev/null
-          echo "Updated failure message to running"
+      - uses: phorus-group/slack-pipeline-notify-action@main
+        with:
+          slack-token: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
+          channel: ${{ inputs.slack-failure-channel }}
+          status: running
 
   build:
     runs-on: ubuntu-latest
@@ -624,65 +580,11 @@ jobs:
     if: ${{ always() && failure() && inputs.slack-failure-channel != '' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Send or update Slack failure notification
-        env:
-          SLACK_TOKEN: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
-          CHANNEL: ${{ inputs.slack-failure-channel }}
-        run: |
-          if [[ -z "$SLACK_TOKEN" ]]; then exit 0; fi
-
-          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          REPO="${{ github.repository }}"
-          REF="${{ github.ref_name }}"
-          SEARCH_TEXT=":x: *Pipeline failed* in \`${REPO}\` on \`${REF}\`"
-
-          echo "Searching for existing failure message for $REPO on $REF..."
-
-          HISTORY=$(curl -s -H "Authorization: Bearer $SLACK_TOKEN" \
-            "https://slack.com/api/conversations.history?channel=${CHANNEL}&limit=20")
-
-          EXISTING_MSG=$(echo "$HISTORY" | jq --arg search "$SEARCH_TEXT" \
-            '[.messages[] | select(.blocks != null) | select(.blocks[].text.text? // "" | contains($search))][0] // empty' 2>/dev/null)
-
-          if [[ -n "$EXISTING_MSG" && "$EXISTING_MSG" != "null" ]]; then
-            echo "Found existing failure message, updating with new failure..."
-            EXISTING_TS=$(echo "$EXISTING_MSG" | jq -r '.ts')
-
-            CURRENT_CONTEXT=$(echo "$EXISTING_MSG" | jq -r '[.blocks[] | select(.type == "context") | .elements[].text][0] // ""')
-            if echo "$CURRENT_CONTEXT" | grep -q "attempt"; then
-              ATTEMPT=$(echo "$CURRENT_CONTEXT" | grep -oP '\d+' | tail -1)
-              ATTEMPT=$((ATTEMPT + 1))
-            else
-              ATTEMPT=2
-            fi
-
-            BLOCKS=$(jq -n --arg repo "$REPO" --arg ref "$REF" --arg url "$RUN_URL" --arg attempt "$ATTEMPT" '[
-              {type: "section", text: {type: "mrkdwn", text: (":x: *Pipeline failed* in `" + $repo + "` on `" + $ref + "`")}},
-              {type: "actions", elements: [{type: "button", text: {type: "plain_text", text: "View Latest Failed Run"}, url: $url, style: "danger"}]},
-              {type: "context", elements: [{type: "mrkdwn", text: (":red_circle: Failed (attempt " + $attempt + ")")}]}
-            ]')
-
-            curl -s -X POST "https://slack.com/api/chat.update" \
-              -H "Authorization: Bearer $SLACK_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d "$(jq -n --arg channel "$CHANNEL" --arg ts "$EXISTING_TS" --argjson blocks "$BLOCKS" \
-                '{channel: $channel, ts: $ts, blocks: $blocks}')" > /dev/null
-            echo "Updated existing failure message (attempt $ATTEMPT)"
-          else
-            echo "No existing failure message found, posting new one..."
-            BLOCKS=$(jq -n --arg repo "$REPO" --arg ref "$REF" --arg url "$RUN_URL" '[
-              {type: "section", text: {type: "mrkdwn", text: (":x: *Pipeline failed* in `" + $repo + "` on `" + $ref + "`")}},
-              {type: "actions", elements: [{type: "button", text: {type: "plain_text", text: "View Failed Run"}, url: $url, style: "danger"}]},
-              {type: "context", elements: [{type: "mrkdwn", text: ":red_circle: Failed"}]}
-            ]')
-
-            curl -s -X POST "https://slack.com/api/chat.postMessage" \
-              -H "Authorization: Bearer $SLACK_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d "$(jq -n --arg channel "$CHANNEL" --argjson blocks "$BLOCKS" \
-                '{channel: $channel, blocks: $blocks, unfurl_links: false, unfurl_media: false}')" > /dev/null
-            echo "Posted new failure message"
-          fi
+      - uses: phorus-group/slack-pipeline-notify-action@main
+        with:
+          slack-token: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
+          channel: ${{ inputs.slack-failure-channel }}
+          status: failure
 
   notify-recovery:
     name: Notify recovery
@@ -690,52 +592,8 @@ jobs:
     if: ${{ always() && !failure() && !cancelled() && inputs.slack-failure-channel != '' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Update previous failure message if exists
-        env:
-          SLACK_TOKEN: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
-          CHANNEL: ${{ inputs.slack-failure-channel }}
-        run: |
-          if [[ -z "$SLACK_TOKEN" ]]; then exit 0; fi
-
-          REPO="${{ github.repository }}"
-          REF="${{ github.ref_name }}"
-          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          SEARCH_TEXT=":x: *Pipeline failed* in \`${REPO}\` on \`${REF}\`"
-
-          HISTORY=$(curl -s -H "Authorization: Bearer $SLACK_TOKEN" \
-            "https://slack.com/api/conversations.history?channel=${CHANNEL}&limit=20")
-
-          echo "Searching for previous failure message for $REPO on $REF..."
-
-          if [[ "$(echo "$HISTORY" | jq -r '.ok')" != "true" ]]; then
-            echo "Could not read channel history"
-            exit 0
-          fi
-
-          FAILURE_MSG=$(echo "$HISTORY" | jq --arg search "$SEARCH_TEXT" \
-            '[.messages[] | select(.blocks != null) | select(.blocks[].text.text? // "" | contains($search))][0] // empty')
-
-          if [[ -z "$FAILURE_MSG" || "$FAILURE_MSG" == "null" ]]; then
-            echo "No previous failure message found, nothing to recover"
-            exit 0
-          fi
-
-          echo "Found previous failure message, marking as recovered..."
-          FAILURE_TS=$(echo "$FAILURE_MSG" | jq -r '.ts')
-          FAILED_URL=$(echo "$FAILURE_MSG" | jq -r '[.blocks[] | select(.type == "actions") | .elements[] | select(.text.text == "View Failed Run" or .text.text == "View Latest Failed Run") | .url][0] // empty')
-
-          UPDATED_BLOCKS=$(jq -n --arg repo "$REPO" --arg ref "$REF" --arg failed_url "$FAILED_URL" --arg fix_url "$RUN_URL" '[
-            {type: "section", text: {type: "mrkdwn", text: (":white_check_mark: *Pipeline recovered* in `" + $repo + "` on `" + $ref + "`")}},
-            {type: "actions", elements: [
-              {type: "button", text: {type: "plain_text", text: "View Failed Run"}, url: $failed_url},
-              {type: "button", text: {type: "plain_text", text: "View Recovery Run"}, url: $fix_url, style: "primary"}
-            ]},
-            {type: "context", elements: [{type: "mrkdwn", text: ":large_green_circle: Recovered"}]}
-          ]')
-
-          curl -s -X POST "https://slack.com/api/chat.update" \
-            -H "Authorization: Bearer $SLACK_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n --arg channel "$CHANNEL" --arg ts "$FAILURE_TS" --argjson blocks "$UPDATED_BLOCKS" \
-              '{channel: $channel, ts: $ts, blocks: $blocks}')" > /dev/null
-          echo "Updated failure message to recovered"
+      - uses: phorus-group/slack-pipeline-notify-action@main
+        with:
+          slack-token: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
+          channel: ${{ inputs.slack-failure-channel }}
+          status: success
