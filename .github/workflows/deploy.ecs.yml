@@ -53,6 +53,11 @@ on:
         type: boolean
         required: false
         default: true
+      wait-for-minutes:
+        description: "Minutes to wait for service stability before timing out"
+        type: number
+        required: false
+        default: 10
       require-published-release:
         description: "Require the current tag to be a published (non-draft) GitHub release before deploying. Use this to gate production deployments"
         type: boolean
@@ -127,3 +132,4 @@ jobs:
           cluster: ${{ inputs.ecs-cluster }}
           service: ${{ inputs.ecs-service }}
           wait-for-service-stability: ${{ inputs.wait-for-service-stability }}
+          wait-for-minutes: ${{ inputs.wait-for-minutes }}
