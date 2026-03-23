@@ -355,8 +355,10 @@ jobs:
           path: test/.merged-unit-coverage/coverage-final.json
 
       - name: Upload to Codecov
-        if: ${{ !cancelled() && inputs.disable-integration-test == 'true' && secrets.codecov-token != '' }}
+        if: ${{ !cancelled() && inputs.disable-integration-test == 'true' && env.CODECOV_TOKEN != '' }}
         uses: codecov/codecov-action@v5
+        env:
+          CODECOV_TOKEN: ${{ secrets.codecov-token }}
         with:
           files: test/.merged-unit-coverage/coverage-final.json
           token: ${{ secrets.codecov-token }}
