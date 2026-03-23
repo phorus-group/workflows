@@ -93,11 +93,6 @@ on:
         type: string
         required: false
         default: ""
-      enable-codecov:
-        description: "Enable Codecov coverage upload"
-        type: boolean
-        required: false
-        default: false
     secrets:
       pub-auth-value:
         description: "Auth value to use inside ~/.npmrc for publishing. Defaults to github.token"
@@ -317,8 +312,7 @@ jobs:
         with:
           command: test:unit
           test-label: Unit
-          enable-codecov: ${{ inputs.enable-codecov && inputs.disable-integration-test == 'true' }}
-          codecov-token: ${{ secrets.codecov-token }}
+          codecov-token: ${{ inputs.disable-integration-test == 'true' && secrets.codecov-token || '' }}
 
       - name: Run storybook tests
         uses: phorus-group/yarn-test-action@main
@@ -348,8 +342,7 @@ jobs:
         with:
           command: test:integration
           test-label: Integration
-          enable-codecov: ${{ inputs.enable-codecov && inputs.disable-unit-test == 'true' }}
-          codecov-token: ${{ secrets.codecov-token }}
+          codecov-token: ${{ inputs.disable-unit-test == 'true' && secrets.codecov-token || '' }}
 
   # This is giving us issues with GHA runners, so we are disabling it for now
   # code-quality:

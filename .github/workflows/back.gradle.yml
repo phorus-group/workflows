@@ -53,11 +53,6 @@ on:
         type: string
         required: false
         default: "false"
-      enable-codecov:
-        description: "Enable Codecov coverage upload"
-        type: boolean
-        required: false
-        default: false
       slack-failure-channel:
         description: "Slack channel ID for failure notifications. If empty, no notification is sent"
         type: string
@@ -124,7 +119,6 @@ jobs:
           java-version: ${{ inputs.java-version }}
           java-distribution: ${{ inputs.java-distribution }}
           build-and-test: ${{ inputs.build-and-test }}
-          enable-codecov: ${{ inputs.build-and-test && inputs.enable-codecov }}
           codecov-token: ${{ secrets.codecov-token }}
         env:
           ORG_GRADLE_PROJECT_readUsername: ${{ inputs.registry-username || github.actor }}
@@ -146,8 +140,7 @@ jobs:
           java-distribution: ${{ inputs.java-distribution }}
           commands: check unitTest -x :test
           artifact-suffix: unit
-          enable-codecov: ${{ inputs.enable-codecov && inputs.disable-integration-test == 'true' }}
-          codecov-token: ${{ secrets.codecov-token }}
+          codecov-token: ${{ inputs.disable-integration-test == 'true' && secrets.codecov-token || '' }}
         env:
           ORG_GRADLE_PROJECT_readUsername: ${{ inputs.registry-username || github.actor }}
           ORG_GRADLE_PROJECT_readPassword: ${{ secrets.read-auth-value || github.token }}
@@ -168,8 +161,7 @@ jobs:
           java-distribution: ${{ inputs.java-distribution }}
           commands: integrationTest
           artifact-suffix: integration
-          enable-codecov: ${{ inputs.enable-codecov && inputs.disable-unit-test == 'true' }}
-          codecov-token: ${{ secrets.codecov-token }}
+          codecov-token: ${{ inputs.disable-unit-test == 'true' && secrets.codecov-token || '' }}
         env:
           ORG_GRADLE_PROJECT_readUsername: ${{ inputs.registry-username || github.actor }}
           ORG_GRADLE_PROJECT_readPassword: ${{ secrets.read-auth-value || github.token }}
@@ -191,7 +183,6 @@ jobs:
           command: jacocoMergeReports
           test-artifact-1: gradle-tests-unit
           test-artifact-2: gradle-tests-integration
-          enable-codecov: ${{ inputs.enable-codecov }}
           codecov-token: ${{ secrets.codecov-token }}
 
   # This is giving us issues with GHA runners, so we are disabling it for now
