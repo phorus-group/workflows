@@ -79,6 +79,9 @@ jobs:
   deploy:
     name: Deploy to Cloud Run (${{ inputs.environment }})
     runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-${{ inputs.environment }}-${{ github.repository }}
+      cancel-in-progress: false
     environment:
       name: ${{ inputs.environment }}
       url: ${{ inputs.environment-url || null }}
