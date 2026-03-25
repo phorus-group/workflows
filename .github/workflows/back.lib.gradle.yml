@@ -115,13 +115,13 @@ on:
     outputs:
       package-group:
         description: "The Maven group ID"
-        value: ${{ jobs.validate-version.outputs.package-group }}
+        value: ${{ jobs.resolve-package-info.outputs.package-group }}
       package-name:
         description: "The artifact name"
-        value: ${{ jobs.validate-version.outputs.package-name }}
+        value: ${{ jobs.resolve-package-info.outputs.package-name }}
       package-version:
         description: "The package version"
-        value: ${{ jobs.validate-version.outputs.package-version }}
+        value: ${{ jobs.resolve-package-info.outputs.package-version }}
 
 jobs:
   notify-start:
@@ -138,14 +138,12 @@ jobs:
           release: ${{ github.event_name == 'release' }}
           release-url: ${{ github.event.release.html_url }}
 
-  validate-version:
-    if: ${{ !inputs.disable-version-validation }}
+  resolve-package-info:
     runs-on: ubuntu-latest
     outputs:
       package-group: ${{ steps.package.outputs.group }}
       package-name: ${{ steps.package.outputs.name }}
       package-version: ${{ steps.package.outputs.version }}
-      published-version: ${{ steps.published.outputs.version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -170,6 +168,11 @@ jobs:
           echo "version=$PACKAGE_VERSION" >> $GITHUB_OUTPUT
           echo "name=$PACKAGE_NAME" >> $GITHUB_OUTPUT
 
+  validate-version:
+    needs: [resolve-package-info]
+    if: ${{ !inputs.disable-version-validation }}
+    runs-on: ubuntu-latest
+    steps:
       - name: Get published version from registry
         id: published
         run: |
@@ -180,8 +183,8 @@ jobs:
             METADATA_BASE_URL="${{ inputs.metadata-base-url }}"
           fi
 
-          GROUP_PATH=$(echo "${{ steps.package.outputs.group }}" | tr '.' '/')
-          METADATA_URL="${METADATA_BASE_URL}/${GROUP_PATH}/${{ steps.package.outputs.name }}/maven-metadata.xml"
+          GROUP_PATH=$(echo "${{ needs.resolve-package-info.outputs.package-group }}" | tr '.' '/')
+          METADATA_URL="${METADATA_BASE_URL}/${GROUP_PATH}/${{ needs.resolve-package-info.outputs.package-name }}/maven-metadata.xml"
 
           echo "Fetching metadata from: $METADATA_URL"
 
@@ -214,7 +217,7 @@ jobs:
       - name: Validate version
         run: |
           export PUBLISHED_VERSION=${{ steps.published.outputs.version }}
-          export PACKAGE_VERSION=${{ steps.package.outputs.version }}
+          export PACKAGE_VERSION=${{ needs.resolve-package-info.outputs.package-version }}
           node -e '
             const semver = require("semver");
             const current = process.env.PUBLISHED_VERSION || "0.0.0";
@@ -349,7 +352,7 @@ jobs:
 
   publish:
     name: Publish library
-    needs: [validate-version, unit-test, integration-test, vulnerability-analysis]
+    needs: [resolve-package-info, validate-version, unit-test, integration-test, vulnerability-analysis]
     if: ${{ !failure() && !cancelled() && !inputs.disable-publish && (github.ref_name == github.event.repository.default_branch || (github.event_name == 'release' && github.event.action == 'published')) }}
     runs-on: ubuntu-latest
     environment:
@@ -388,13 +391,13 @@ jobs:
         run: |
           echo "## ✅ Published Successfully" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Group:** ${{ needs.validate-version.outputs.package-group }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Artifact:** ${{ needs.validate-version.outputs.package-name }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Version:** ${{ needs.validate-version.outputs.package-version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Group:** ${{ needs.resolve-package-info.outputs.package-group }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Artifact:** ${{ needs.resolve-package-info.outputs.package-name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ needs.resolve-package-info.outputs.package-version }}" >> $GITHUB_STEP_SUMMARY
 
   enforce-all-checks:
     name: Enforce all checks
-    needs: [validate-version, unit-test, integration-test, vulnerability-analysis]
+    needs: [resolve-package-info, validate-version, unit-test, integration-test, vulnerability-analysis]
     if: ${{ !failure() && !cancelled() && github.ref_name != github.event.repository.default_branch && github.event_name != 'release' }}
     runs-on: ubuntu-latest
     permissions:

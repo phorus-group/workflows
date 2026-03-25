@@ -94,13 +94,13 @@ on:
     outputs:
       package-name:
         description: "The npm package name"
-        value: ${{ jobs.validate-version.outputs.package-name }}
+        value: ${{ jobs.resolve-package-info.outputs.package-name }}
       package-scope:
         description: "The npm package scope"
-        value: ${{ jobs.validate-version.outputs.package-scope }}
+        value: ${{ jobs.resolve-package-info.outputs.package-scope }}
       package-version:
         description: "The package version"
-        value: ${{ jobs.validate-version.outputs.package-version }}
+        value: ${{ jobs.resolve-package-info.outputs.package-version }}
 
 jobs:
   notify-start:
@@ -117,14 +117,12 @@ jobs:
           release: ${{ github.event_name == 'release' }}
           release-url: ${{ github.event.release.html_url }}
 
-  validate-version:
-    if: ${{ !inputs.disable-version-validation }}
+  resolve-package-info:
     runs-on: ubuntu-latest
     outputs:
       package-name: ${{ steps.package.outputs.name }}
       package-scope: ${{ steps.package.outputs.scope }}
       package-version: ${{ steps.package.outputs.version }}
-      published-version: ${{ steps.published.outputs.version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -135,21 +133,26 @@ jobs:
           PACKAGE_NAME=$(jq -r .name package.json)
           echo "name=$PACKAGE_NAME" >> $GITHUB_OUTPUT
           echo "version=$(jq -r .version package.json)" >> $GITHUB_OUTPUT
-          
+
           if [[ $PACKAGE_NAME != @*/* ]]; then
             echo "Error: Package name must be scoped (e.g., @scope/package-name)."
             exit 1
           fi
-          
+
           PACKAGE_SCOPE=$(echo $PACKAGE_NAME | cut -d'/' -f1)
           echo "scope=$PACKAGE_SCOPE" >> $GITHUB_OUTPUT
 
+  validate-version:
+    needs: [resolve-package-info]
+    if: ${{ !inputs.disable-version-validation }}
+    runs-on: ubuntu-latest
+    steps:
       - name: Get published version from GitHub Package Registry
         id: published
         run: |
           echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ secrets.pub-auth-value || github.token }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
-          PUBLISHED_VERSION=$(npm view ${{ steps.package.outputs.name }} version --registry=https://${{ inputs.registry }} || echo "0.0.0")
+          PUBLISHED_VERSION=$(npm view ${{ needs.resolve-package-info.outputs.package-name }} version --registry=https://${{ inputs.registry }} || echo "0.0.0")
           echo "version=$PUBLISHED_VERSION" >> $GITHUB_OUTPUT
 
       - name: Setup Node.js
@@ -165,8 +168,8 @@ jobs:
       - name: Validate version
         run: |
           export PUBLISHED_VERSION=${{ steps.published.outputs.version }}
-          export PACKAGE_VERSION=${{ steps.package.outputs.version }}
-          node -e ' 
+          export PACKAGE_VERSION=${{ needs.resolve-package-info.outputs.package-version }}
+          node -e '
             const semver = require("semver");
             const current = process.env.PUBLISHED_VERSION || "0.0.0";
             const next = process.env.PACKAGE_VERSION;
@@ -185,6 +188,7 @@ jobs:
           '
 
   build:
+    needs: [resolve-package-info]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -200,7 +204,7 @@ jobs:
           AUTH_VALUE: ${{ secrets.read-auth-value || secrets.PACKAGES_READ }}
         if: ${{ env.AUTH_VALUE != '' }}
         run: |
-          echo "${{ needs.validate-version.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
+          echo "${{ needs.resolve-package-info.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
           echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ secrets.read-auth-value || secrets.PACKAGES_READ }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
 
@@ -225,7 +229,7 @@ jobs:
 
   unit-test:
     name: Unit tests
-    needs: [build]
+    needs: [resolve-package-info, build]
     if: ${{ !inputs.disable-unit-test }}
     runs-on: ubuntu-latest
     steps:
@@ -237,7 +241,7 @@ jobs:
           AUTH_VALUE: ${{ secrets.read-auth-value || secrets.PACKAGES_READ }}
         if: ${{ env.AUTH_VALUE != '' }}
         run: |
-          echo "${{ needs.validate-version.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
+          echo "${{ needs.resolve-package-info.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
           echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ secrets.read-auth-value || secrets.PACKAGES_READ }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
 
@@ -298,7 +302,7 @@ jobs:
 
   integration-test:
     name: Integration tests
-    needs: [build]
+    needs: [resolve-package-info, build]
     if: ${{ !inputs.disable-integration-test }}
     runs-on: ubuntu-latest
     steps:
@@ -310,7 +314,7 @@ jobs:
           AUTH_VALUE: ${{ secrets.read-auth-value || secrets.PACKAGES_READ }}
         if: ${{ env.AUTH_VALUE != '' }}
         run: |
-          echo "${{ needs.validate-version.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
+          echo "${{ needs.resolve-package-info.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
           echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ secrets.read-auth-value || secrets.PACKAGES_READ }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
 
@@ -353,7 +357,7 @@ jobs:
 
   publish:
     name: Publish library
-    needs: [validate-version,unit-test,integration-test,vulnerability-analysis]
+    needs: [resolve-package-info,validate-version,unit-test,integration-test,vulnerability-analysis]
     if: ${{ !failure() && !cancelled() && !inputs.disable-publish && (github.ref_name == github.event.repository.default_branch || (github.event_name == 'release' && github.event.action == 'published')) }}
     runs-on: ubuntu-latest
     environment:
@@ -370,7 +374,7 @@ jobs:
 
       - name: Configure npm registry globally in ~/.npmrc
         run: |
-          echo "${{ needs.validate-version.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
+          echo "${{ needs.resolve-package-info.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
           echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ secrets.pub-auth-value || github.token }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
 
@@ -385,13 +389,13 @@ jobs:
         run: |
           echo "## ✅ Published Successfully" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Scope:** ${{ needs.validate-version.outputs.package-scope }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Package:** ${{ needs.validate-version.outputs.package-name }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Version:** ${{ needs.validate-version.outputs.package-version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Scope:** ${{ needs.resolve-package-info.outputs.package-scope }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Package:** ${{ needs.resolve-package-info.outputs.package-name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ needs.resolve-package-info.outputs.package-version }}" >> $GITHUB_STEP_SUMMARY
 
   enforce-all-checks:
     name: Enforce all checks
-    needs: [validate-version,unit-test,integration-test,vulnerability-analysis]
+    needs: [resolve-package-info,validate-version,unit-test,integration-test,vulnerability-analysis]
     if: ${{ !failure() && !cancelled() && github.ref_name != github.event.repository.default_branch && github.event_name != 'release' }}
     runs-on: ubuntu-latest
     permissions:
