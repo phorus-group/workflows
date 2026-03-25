@@ -440,32 +440,19 @@ jobs:
           token: ${{ github.token }}
           ignore_pattern: ".*Enforce all checks"
 
-  notify-failure:
-    name: Notify failure
+  notify-end:
+    name: Notify pipeline finished
     needs: [build, unit-test, integration-test, vulnerability-analysis, publish, enforce-all-checks]
-    if: ${{ always() && failure() && (inputs.slack-failure-channel != '' || inputs.slack-releases-channel != '') }}
+    if: ${{ always() && (inputs.slack-failure-channel != '' || inputs.slack-releases-channel != '') }}
     runs-on: ubuntu-latest
     steps:
       - uses: phorus-group/slack-pipeline-notify-action@main
         with:
           slack-token: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
           notifications-channel: ${{ inputs.slack-failure-channel }}
-          status: failure
+          status: ${{ contains(needs.*.result, 'failure') && 'failure' || 'success' }}
           releases-channel: ${{ inputs.slack-releases-channel }}
           release: ${{ github.event_name == 'release' }}
           release-url: ${{ github.event.release.html_url }}
-
-  notify-recovery:
-    name: Notify recovery
-    needs: [build, unit-test, integration-test, vulnerability-analysis, publish, enforce-all-checks]
-    if: ${{ always() && !failure() && !cancelled() && (inputs.slack-failure-channel != '' || inputs.slack-releases-channel != '') }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: phorus-group/slack-pipeline-notify-action@main
-        with:
-          slack-token: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
-          notifications-channel: ${{ inputs.slack-failure-channel }}
-          status: success
-          releases-channel: ${{ inputs.slack-releases-channel }}
           release: ${{ github.event_name == 'release' }}
           release-url: ${{ github.event.release.html_url }}
