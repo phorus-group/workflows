@@ -460,5 +460,3 @@ jobs:
           releases-channel: ${{ inputs.slack-releases-channel }}
           release: ${{ github.event_name == 'release' }}
           release-url: ${{ github.event.release.html_url }}
-          release: ${{ github.event_name == 'release' }}
-          release-url: ${{ github.event.release.html_url }}
