@@ -38,6 +38,11 @@ on:
         type: string
         required: false
         default: "false"
+      disable-version-validation:
+        description: "Disable the version validation job. When true, version is not checked against the published version"
+        type: boolean
+        required: false
+        default: false
       disable-publish:
         description: "Disable the library publish job"
         type: boolean
@@ -138,6 +143,7 @@ jobs:
           release-url: ${{ github.event.release.html_url }}
 
   validate-version:
+    if: ${{ !inputs.disable-version-validation }}
     runs-on: ubuntu-latest
     outputs:
       package-name: ${{ steps.package.outputs.name }}
