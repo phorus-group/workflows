@@ -144,71 +144,19 @@ on:
         value: ${{ jobs.validate-version.outputs.package-version }}
 
 jobs:
-  slack-release-start:
-    name: Notify release started
-    if: ${{ inputs.slack-releases-channel != '' && github.event_name == 'release' && github.event.action == 'published' }}
+  notify-start:
+    name: Notify pipeline started
+    if: ${{ inputs.slack-failure-channel != '' || inputs.slack-releases-channel != '' }}
     runs-on: ubuntu-latest
-    outputs:
-      thread-ts: ${{ steps.status.outputs.thread_ts }}
     steps:
-      - name: Find draft message and set running status
-        id: status
-        env:
-          SLACK_TOKEN: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
-          CHANNEL: ${{ inputs.slack-releases-channel }}
-        run: |
-          if [[ -z "$SLACK_TOKEN" ]]; then
-            echo "No Slack token, skipping"
-            exit 0
-          fi
-
-          TAG="${{ github.ref_name }}"
-
-          HISTORY=$(curl -s -H "Authorization: Bearer $SLACK_TOKEN" \
-            "https://slack.com/api/conversations.history?channel=${CHANNEL}&limit=50")
-
-          if [[ "$(echo "$HISTORY" | jq -r '.ok')" != "true" ]]; then
-            echo "conversations.history failed: $(echo "$HISTORY" | jq -r '.error')"
-            exit 0
-          fi
-
-          THREAD_TS=$(echo "$HISTORY" | jq -r --arg tag "$TAG" \
-            '[.messages[] | select(.text | contains($tag))][0].ts // empty')
-
-          if [[ -z "$THREAD_TS" ]]; then
-            echo "Draft message not found for tag $TAG"
-            exit 0
-          fi
-
-          echo "thread_ts=$THREAD_TS" >> $GITHUB_OUTPUT
-
-          RELEASE_URL="${{ github.event.release.html_url || format('{0}/{1}/releases/tag/{2}', github.server_url, github.repository, github.ref_name) }}"
-          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-
-          ORIGINAL_BLOCKS=$(echo "$HISTORY" | jq --arg ts "$THREAD_TS" \
-            '[.messages[] | select(.ts == $ts)][0].blocks')
-
-          PIPELINE_BTN=$(jq -n --arg url "$RUN_URL" \
-            '{type: "button", text: {type: "plain_text", text: "View Pipeline"}, url: $url}')
-
-          UPDATED_BLOCKS=$(echo "$ORIGINAL_BLOCKS" | jq --arg url "$RELEASE_URL" --argjson pipeline_btn "$PIPELINE_BTN" \
-            'map(if .type == "actions" then
-              .elements = [(.elements[] | if .text.text == "View Release" then .url = $url | .text.text = "View Published Release" else . end)] + [$pipeline_btn]
-            else . end)
-            + [{type: "context", elements: [{type: "mrkdwn", text: ":hourglass_flowing_sand: Release pipeline running..."}]}]')
-
-          UPDATE_PAYLOAD=$(jq -n \
-            --arg channel "$CHANNEL" \
-            --arg ts "$THREAD_TS" \
-            --argjson blocks "$UPDATED_BLOCKS" \
-            '{channel: $channel, ts: $ts, blocks: $blocks}')
-
-          RESPONSE=$(curl -s -X POST "https://slack.com/api/chat.update" \
-            -H "Authorization: Bearer $SLACK_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "$UPDATE_PAYLOAD")
-
-          echo "Status update: $(echo "$RESPONSE" | jq -c '{ok: .ok, error: .error}')"
+      - uses: phorus-group/slack-pipeline-notify-action@main
+        with:
+          slack-token: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
+          notifications-channel: ${{ inputs.slack-failure-channel }}
+          status: running
+          releases-channel: ${{ inputs.slack-releases-channel }}
+          release: ${{ github.event_name == 'release' }}
+          release-url: ${{ github.event.release.html_url }}
 
   validate-version:
     runs-on: ubuntu-latest
@@ -304,17 +252,6 @@ jobs:
             }
             console.log(`✓ Version ${next} is valid and greater than ${current}`);
           '
-
-  notify-running:
-    name: Mark previous failure as running
-    if: ${{ inputs.slack-failure-channel != '' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: phorus-group/slack-pipeline-notify-action@main
-        with:
-          slack-token: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
-          channel: ${{ inputs.slack-failure-channel }}
-          status: running
 
   build:
     runs-on: ubuntu-latest
@@ -492,74 +429,6 @@ jobs:
           echo "- **Artifact:** ${{ needs.validate-version.outputs.package-name }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Version:** ${{ needs.validate-version.outputs.package-version }}" >> $GITHUB_STEP_SUMMARY
 
-  slack-release-end:
-    name: Notify release finished
-    needs: [slack-release-start, publish]
-    if: ${{ always() && needs.slack-release-start.outputs.thread-ts != '' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Update draft message with final status
-        env:
-          SLACK_TOKEN: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
-          CHANNEL: ${{ inputs.slack-releases-channel }}
-          THREAD_TS: ${{ needs.slack-release-start.outputs.thread-ts }}
-        run: |
-          TAG="${{ github.ref_name }}"
-          RELEASE_URL="${{ github.event.release.html_url || format('{0}/{1}/releases/tag/{2}', github.server_url, github.repository, github.ref_name) }}"
-          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          IS_SUCCESS="${{ needs.publish.result == 'success' }}"
-
-          MSG=$(curl -s -H "Authorization: Bearer $SLACK_TOKEN" \
-            "https://slack.com/api/conversations.history?channel=${CHANNEL}&latest=${THREAD_TS}&oldest=${THREAD_TS}&inclusive=true&limit=1")
-
-          ORIGINAL_BLOCKS=$(echo "$MSG" | jq '[.messages[0].blocks[] | select(.type != "context")]')
-
-          if [[ "$IS_SUCCESS" == "true" ]]; then
-            STATUS_TEXT=":white_check_mark: Released successfully"
-            UPDATED_BLOCKS=$(echo "$ORIGINAL_BLOCKS" | jq --arg status "$STATUS_TEXT" \
-              '. + [{type: "context", elements: [{type: "mrkdwn", text: $status}]}]')
-          else
-            STATUS_TEXT=":x: Release pipeline failed"
-            BUTTON=$(jq -n --arg url "$RUN_URL" \
-              '{type: "button", text: {type: "plain_text", text: "View Failed Run"}, url: $url, style: "danger"}')
-            UPDATED_BLOCKS=$(echo "$ORIGINAL_BLOCKS" | jq --argjson btn "$BUTTON" --arg status "$STATUS_TEXT" \
-              'if any(.type == "actions") then
-                map(if .type == "actions" then .elements += [$btn] else . end)
-              else . + [{type: "actions", elements: [$btn]}]
-              end
-              + [{type: "context", elements: [{type: "mrkdwn", text: $status}]}]')
-          fi
-
-          UPDATE_PAYLOAD=$(jq -n \
-            --arg channel "$CHANNEL" \
-            --arg ts "$THREAD_TS" \
-            --argjson blocks "$UPDATED_BLOCKS" \
-            '{channel: $channel, ts: $ts, blocks: $blocks}')
-
-          RESPONSE=$(curl -s -X POST "https://slack.com/api/chat.update" \
-            -H "Authorization: Bearer $SLACK_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "$UPDATE_PAYLOAD")
-
-          echo "Status update: $(echo "$RESPONSE" | jq -c '{ok: .ok, error: .error}')"
-
-          if [[ "$IS_SUCCESS" == "true" ]]; then
-            REPLY="*Release pipeline completed* for <${RELEASE_URL}|${TAG}> in \`${{ github.repository }}\`"
-          else
-            REPLY="*Release pipeline failed* for <${RELEASE_URL}|${TAG}> in \`${{ github.repository }}\` — <${RUN_URL}|view run>"
-          fi
-
-          REPLY_PAYLOAD=$(jq -n \
-            --arg channel "$CHANNEL" \
-            --arg thread_ts "$THREAD_TS" \
-            --arg text "$REPLY" \
-            '{channel: $channel, thread_ts: $thread_ts, text: $text, unfurl_links: false, unfurl_media: false}')
-
-          curl -s -X POST "https://slack.com/api/chat.postMessage" \
-            -H "Authorization: Bearer $SLACK_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "$REPLY_PAYLOAD" > /dev/null
-
   enforce-all-checks:
     name: Enforce all checks
     needs: [validate-version, unit-test, integration-test, vulnerability-analysis]
@@ -577,23 +446,29 @@ jobs:
   notify-failure:
     name: Notify failure
     needs: [build, unit-test, integration-test, vulnerability-analysis, publish, enforce-all-checks]
-    if: ${{ always() && failure() && inputs.slack-failure-channel != '' }}
+    if: ${{ always() && failure() && (inputs.slack-failure-channel != '' || inputs.slack-releases-channel != '') }}
     runs-on: ubuntu-latest
     steps:
       - uses: phorus-group/slack-pipeline-notify-action@main
         with:
           slack-token: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
-          channel: ${{ inputs.slack-failure-channel }}
+          notifications-channel: ${{ inputs.slack-failure-channel }}
           status: failure
+          releases-channel: ${{ inputs.slack-releases-channel }}
+          release: ${{ github.event_name == 'release' }}
+          release-url: ${{ github.event.release.html_url }}
 
   notify-recovery:
     name: Notify recovery
     needs: [build, unit-test, integration-test, vulnerability-analysis, publish, enforce-all-checks]
-    if: ${{ always() && !failure() && !cancelled() && inputs.slack-failure-channel != '' }}
+    if: ${{ always() && !failure() && !cancelled() && (inputs.slack-failure-channel != '' || inputs.slack-releases-channel != '') }}
     runs-on: ubuntu-latest
     steps:
       - uses: phorus-group/slack-pipeline-notify-action@main
         with:
           slack-token: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
-          channel: ${{ inputs.slack-failure-channel }}
+          notifications-channel: ${{ inputs.slack-failure-channel }}
           status: success
+          releases-channel: ${{ inputs.slack-releases-channel }}
+          release: ${{ github.event_name == 'release' }}
+          release-url: ${{ github.event.release.html_url }}

@@ -109,7 +109,7 @@ jobs:
       - uses: phorus-group/slack-pipeline-notify-action@main
         with:
           slack-token: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
-          channel: ${{ inputs.slack-failure-channel }}
+          notifications-channel: ${{ inputs.slack-failure-channel }}
           status: running
 
   build:
@@ -360,7 +360,7 @@ jobs:
       - uses: phorus-group/slack-pipeline-notify-action@main
         with:
           slack-token: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
-          channel: ${{ inputs.slack-failure-channel }}
+          notifications-channel: ${{ inputs.slack-failure-channel }}
           status: failure
 
   notify-recovery:
@@ -372,5 +372,5 @@ jobs:
       - uses: phorus-group/slack-pipeline-notify-action@main
         with:
           slack-token: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
-          channel: ${{ inputs.slack-failure-channel }}
+          notifications-channel: ${{ inputs.slack-failure-channel }}
           status: success
