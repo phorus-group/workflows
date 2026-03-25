@@ -1,0 +1,158 @@
+name: Reusable workflow to check for unreleased changes and send a Slack reminder
+
+on:
+  workflow_call:
+    inputs:
+      min-commits:
+        description: "Minimum number of unreleased commits before sending a reminder"
+        type: number
+        required: false
+        default: 1
+      max-changelog-entries:
+        description: "Maximum number of entries in the changelog preview"
+        type: number
+        required: false
+        default: 20
+      slack-releases-channel:
+        description: "Slack channel ID for release reminder notifications"
+        type: string
+        required: true
+      draft-release-workflow:
+        description: "Filename of the draft release workflow to link to"
+        type: string
+        required: false
+        default: "draft-release.yml"
+    secrets:
+      slack-bot-token:
+        description: "Slack Bot User OAuth Token (xoxb-...). Required scopes: chat:write"
+        required: false
+
+jobs:
+  check-and-remind:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get last tag and count unreleased commits
+        id: changes
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          echo "previous_tag=$PREV_TAG" >> $GITHUB_OUTPUT
+
+          if [[ -z "$PREV_TAG" ]]; then
+            COUNT=$(git rev-list --first-parent --count HEAD)
+            RANGE="HEAD"
+          else
+            COUNT=$(git rev-list --first-parent --count "${PREV_TAG}..HEAD")
+            RANGE="${PREV_TAG}..HEAD"
+          fi
+
+          echo "count=$COUNT" >> $GITHUB_OUTPUT
+          echo "range=$RANGE" >> $GITHUB_OUTPUT
+          echo "Unreleased commits: $COUNT (since ${PREV_TAG:-beginning})"
+
+      - name: Build changelog preview
+        if: ${{ fromJSON(steps.changes.outputs.count) >= inputs.min-commits }}
+        id: changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RANGE="${{ steps.changes.outputs.range }}"
+          PREV_TAG="${{ steps.changes.outputs.previous_tag }}"
+          MAX_ENTRIES=${{ inputs.max-changelog-entries }}
+
+          if [[ -n "$PREV_TAG" ]]; then
+            SINCE_DATE=$(git log -1 --format=%aI "$PREV_TAG")
+          else
+            SINCE_DATE=$(git log --reverse --format=%aI | head -1)
+          fi
+
+          PRS=$(gh pr list \
+            --state merged \
+            --base "${{ github.event.repository.default_branch }}" \
+            --limit 100 \
+            --json number,title,author,mergedAt,url,mergeCommit \
+            --jq "[.[] | select(.mergedAt >= \"$SINCE_DATE\")]" 2>/dev/null || echo "[]")
+          PR_MAP=$(echo "$PRS" | jq '[.[] | {key: .mergeCommit.oid, value: {num: .number, title: .title, author: .author.login, url: .url}}] | from_entries' 2>/dev/null || echo "{}")
+
+          CHANGELOG=""
+          TIMELINE=$(git log $RANGE --first-parent --format="%H|%s|%an" 2>/dev/null | head -n "$MAX_ENTRIES")
+
+          ENTRY_COUNT=0
+          while IFS='|' read -r sha subject author; do
+            if [[ -z "$sha" ]]; then continue; fi
+            SHORT_SHA=$(echo "$sha" | cut -c1-7)
+
+            PR_ENTRY=$(echo "$PR_MAP" | jq -c --arg sha "$sha" '.[$sha] // empty' 2>/dev/null)
+
+            if [[ -n "$PR_ENTRY" ]]; then
+              PR_NUM=$(echo "$PR_ENTRY" | jq -r '.num')
+              PR_TITLE=$(echo "$PR_ENTRY" | jq -r '.title')
+              PR_AUTHOR=$(echo "$PR_ENTRY" | jq -r '.author')
+              CHANGELOG+="- *PR #${PR_NUM}:* ${PR_TITLE} by ${PR_AUTHOR}\n"
+            else
+              CHANGELOG+="- *\`${SHORT_SHA}\`:* ${subject} by ${author}\n"
+            fi
+            ENTRY_COUNT=$((ENTRY_COUNT + 1))
+          done <<< "$TIMELINE"
+
+          TOTAL=${{ steps.changes.outputs.count }}
+          if [[ "$ENTRY_COUNT" -lt "$TOTAL" ]]; then
+            CHANGELOG+="\n_Showing ${ENTRY_COUNT} of ${TOTAL} changes_\n"
+          fi
+
+          EOF_MARKER=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+          echo "changelog<<${EOF_MARKER}" >> $GITHUB_OUTPUT
+          echo -e "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "${EOF_MARKER}" >> $GITHUB_OUTPUT
+
+      - name: Send Slack reminder
+        if: ${{ fromJSON(steps.changes.outputs.count) >= inputs.min-commits }}
+        env:
+          SLACK_TOKEN: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
+          CHANNEL: ${{ inputs.slack-releases-channel }}
+          CHANGELOG: ${{ steps.changelog.outputs.changelog }}
+        run: |
+          REPO="${{ github.repository }}"
+          COUNT="${{ steps.changes.outputs.count }}"
+          PREV_TAG="${{ steps.changes.outputs.previous_tag }}"
+          DRAFT_URL="${{ github.server_url }}/${{ github.repository }}/actions/workflows/${{ inputs.draft-release-workflow }}"
+
+          SINCE_TEXT=""
+          if [[ -n "$PREV_TAG" ]]; then
+            SINCE_TEXT=" since \`${PREV_TAG}\`"
+          fi
+
+          BLOCKS=$(jq -n \
+            --arg repo "$REPO" \
+            --arg count "$COUNT" \
+            --arg since "$SINCE_TEXT" \
+            --arg changelog "$CHANGELOG" \
+            --arg draft_url "$DRAFT_URL" \
+            '[
+              {type: "section", text: {type: "mrkdwn", text: (":package: *Release reminder* for `" + $repo + "`\n" + $count + " unreleased change(s)" + $since)}},
+              {type: "section", text: {type: "mrkdwn", text: $changelog}},
+              {type: "context", elements: [{type: "mrkdwn", text: "Before releasing, make sure the version in the build file is set correctly based on the changes and follows <https://semver.org|Semantic Versioning> conventions."}]},
+              {type: "actions", elements: [
+                {type: "button", text: {type: "plain_text", text: "Create Draft Release"}, url: $draft_url, style: "primary"}
+              ]}
+            ]')
+
+          curl -s -X POST "https://slack.com/api/chat.postMessage" \
+            -H "Authorization: Bearer $SLACK_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+              --arg channel "$CHANNEL" \
+              --argjson blocks "$BLOCKS" \
+              --arg repo "$REPO" \
+              --arg count "$COUNT" \
+              '{channel: $channel, blocks: $blocks, text: ("Release reminder: " + $count + " unreleased changes in " + $repo), unfurl_links: false, unfurl_media: false}')" > /dev/null
+
+          echo "Reminder sent: $COUNT unreleased changes in $REPO"
+
+      - name: Skip notification
+        if: ${{ fromJSON(steps.changes.outputs.count) < inputs.min-commits }}
+        run: echo "Only ${{ steps.changes.outputs.count }} unreleased commit(s), below threshold of ${{ inputs.min-commits }}. Skipping reminder."
