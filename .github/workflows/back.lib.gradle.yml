@@ -45,14 +45,14 @@ on:
         default: false
       disable-unit-test:
         description: "Disable unit testing job"
-        type: string
+        type: boolean
         required: false
-        default: "false"
+        default: false
       disable-integration-test:
         description: "Disable integration testing job"
-        type: string
+        type: boolean
         required: false
-        default: "false"
+        default: false
       disable-version-validation:
         description: "Disable the version validation job. When true, version is not checked against the published version"
         type: boolean
@@ -73,31 +73,6 @@ on:
         type: boolean
         required: false
         default: false
-      code-quality-info-threshold:
-        description: "The number of findings of this severity allowed before the job returns a failure"
-        type: number
-        required: false
-        default: 10
-      code-quality-minor-threshold:
-        description: "The number of findings of this severity allowed before the job returns a failure"
-        type: number
-        required: false
-        default: 5
-      code-quality-major-threshold:
-        description: "The number of findings of this severity allowed before the job returns a failure"
-        type: number
-        required: false
-        default: 1
-      code-quality-critical-threshold:
-        description: "The number of findings of this severity allowed before the job returns a failure"
-        type: number
-        required: false
-        default: 0
-      code-quality-blocker-threshold:
-        description: "The number of findings of this severity allowed before the job returns a failure"
-        type: number
-        required: false
-        default: 0
       slack-releases-channel:
         description: "Slack channel ID for release pipeline notifications. If empty, no notification is sent"
         type: string
@@ -279,7 +254,7 @@ jobs:
   unit-test:
     name: Unit tests
     needs: [build]
-    if: ${{ !inputs.build-and-test && inputs.disable-unit-test != 'true' }}
+    if: ${{ !inputs.build-and-test && !inputs.disable-unit-test }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -292,7 +267,7 @@ jobs:
           java-distribution: ${{ inputs.java-distribution }}
           commands: check unitTest -x :test
           artifact-suffix: unit
-          codecov-token: ${{ inputs.disable-integration-test == 'true' && secrets.codecov-token || '' }}
+          codecov-token: ${{ inputs.disable-integration-test && secrets.codecov-token || '' }}
         env:
           ORG_GRADLE_PROJECT_readUsername: ${{ inputs.registry-username || github.actor }}
           ORG_GRADLE_PROJECT_readPassword: ${{ secrets.read-auth-value || github.token }}
@@ -300,7 +275,7 @@ jobs:
   integration-test:
     name: Integration tests
     needs: [build]
-    if: ${{ !inputs.build-and-test && inputs.disable-integration-test != 'true' }}
+    if: ${{ !inputs.build-and-test && !inputs.disable-integration-test }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -313,14 +288,14 @@ jobs:
           java-distribution: ${{ inputs.java-distribution }}
           commands: integrationTest
           artifact-suffix: integration
-          codecov-token: ${{ inputs.disable-unit-test == 'true' && secrets.codecov-token || '' }}
+          codecov-token: ${{ inputs.disable-unit-test && secrets.codecov-token || '' }}
         env:
           ORG_GRADLE_PROJECT_readUsername: ${{ inputs.registry-username || github.actor }}
           ORG_GRADLE_PROJECT_readPassword: ${{ secrets.read-auth-value || github.token }}
 
   merge-test-reports:
     name: Merge test reports
-    if: ${{ !failure() && !cancelled() && !inputs.build-and-test && inputs.disable-unit-test != 'true' && inputs.disable-integration-test != 'true' }}
+    if: ${{ !failure() && !cancelled() && !inputs.build-and-test && !inputs.disable-unit-test && !inputs.disable-integration-test }}
     needs: [unit-test, integration-test]
     runs-on: ubuntu-latest
     steps:
@@ -336,24 +311,6 @@ jobs:
           test-artifact-1: gradle-tests-unit
           test-artifact-2: gradle-tests-integration
           codecov-token: ${{ secrets.codecov-token }}
-
-  # This is giving us issues with GHA runners, so we are disabling it for now
-  # code-quality:
-  #   name: Code quality check
-  #   needs: [build]
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Checkout code
-  #       uses: actions/checkout@v4
-
-  #     - name: Check code quality
-  #       uses: phorus-group/code-quality-action@main
-  #       with:
-  #         info-threshold: ${{ inputs.code-quality-info-threshold }}
-  #         minor-threshold: ${{ inputs.code-quality-minor-threshold }}
-  #         major-threshold: ${{ inputs.code-quality-major-threshold }}
-  #         critical-threshold: ${{ inputs.code-quality-critical-threshold }}
-  #         blocker-threshold: ${{ inputs.code-quality-blocker-threshold }}
 
   vulnerability-analysis:
     name: Vulnerability analysis
