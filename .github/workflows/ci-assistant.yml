@@ -1,0 +1,193 @@
+name: CI Assistant
+
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        description: "Java version to set up (leave empty to skip)"
+        type: string
+        required: false
+        default: ""
+      java-distribution:
+        description: "Java distribution to use"
+        type: string
+        required: false
+        default: "temurin"
+      node-version:
+        description: "Node version to set up (leave empty to skip)"
+        type: string
+        required: false
+        default: ""
+      slack-failure-channel:
+        description: "Slack channel ID for fix notifications"
+        type: string
+        required: false
+        default: ""
+      slack-thread-ts:
+        description: "Slack thread timestamp to reply in"
+        type: string
+        required: false
+        default: ""
+      max-turns:
+        description: "Max Claude conversation turns per attempt"
+        type: number
+        required: false
+        default: 10
+      max-retries:
+        description: "Max retry attempts per run"
+        type: number
+        required: false
+        default: 3
+      model:
+        description: "Claude model to use"
+        type: string
+        required: false
+        default: "claude-sonnet-4-6"
+      admin-users:
+        description: "Comma-separated GitHub usernames with admin access"
+        type: string
+        required: false
+        default: ""
+      banned-users:
+        description: "Comma-separated GitHub usernames banned from CI Assistant"
+        type: string
+        required: false
+        default: ""
+      auto-fix-prompt:
+        description: "Prompt template for automatic fix attempts"
+        type: string
+        required: false
+        default: ""
+      retry-prompt:
+        description: "Prompt template for retry attempts"
+        type: string
+        required: false
+        default: ""
+      alternative-prompt:
+        description: "Prompt template for alternative suggestions"
+        type: string
+        required: false
+        default: ""
+      suggest-prompt:
+        description: "Prompt template for suggest commands"
+        type: string
+        required: false
+        default: ""
+      explain-prompt:
+        description: "Prompt template for explain commands"
+        type: string
+        required: false
+        default: ""
+      confidence-prompt:
+        description: "Prompt template for confidence analysis"
+        type: string
+        required: false
+        default: ""
+    secrets:
+      claude-code-oauth-token:
+        required: false
+      anthropic-api-key:
+        required: false
+      slack-bot-token:
+        required: false
+
+jobs:
+  ci-assistant:
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.repository.full_name == github.repository) ||
+      (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/ci-assistant') && github.event.issue.pull_request && github.event.comment.user.type != 'Bot') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ci-assistant-${{ github.event.issue.number || github.event.workflow_run.head_branch || 'manual' }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: read
+      issues: write
+    steps:
+      - name: Determine mode and context
+        id: context
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            echo "mode=auto-fix" >> $GITHUB_OUTPUT
+            echo "checkout-ref=${{ github.event.workflow_run.head_sha }}" >> $GITHUB_OUTPUT
+            echo "failed-run-id=${{ github.event.workflow_run.id }}" >> $GITHUB_OUTPUT
+            echo "failed-branch=${{ github.event.workflow_run.head_branch }}" >> $GITHUB_OUTPUT
+            echo "failed-sha=${{ github.event.workflow_run.head_sha }}" >> $GITHUB_OUTPUT
+            PR_NUMBER=$(gh api repos/${{ github.repository }}/commits/${{ github.event.workflow_run.head_sha }}/pulls --jq '.[0].number // empty' 2>/dev/null || echo "")
+            echo "failed-pr-number=${PR_NUMBER}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "issue_comment" ]]; then
+            echo "mode=command" >> $GITHUB_OUTPUT
+            echo "comment-pr-number=${{ github.event.issue.number }}" >> $GITHUB_OUTPUT
+            PR_SHA=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number }} --jq '.head.sha')
+            echo "checkout-ref=${PR_SHA}" >> $GITHUB_OUTPUT
+          else
+            echo "mode=manual" >> $GITHUB_OUTPUT
+            echo "failed-run-id=${{ inputs.run-id }}" >> $GITHUB_OUTPUT
+            echo "checkout-ref=" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.context.outputs.checkout-ref || '' }}
+
+      - uses: actions/setup-java@v4
+        if: inputs.java-version != ''
+        with:
+          distribution: ${{ inputs.java-distribution }}
+          java-version: ${{ inputs.java-version }}
+          cache: gradle
+
+      - uses: actions/setup-node@v4
+        if: inputs.node-version != ''
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Run CI Assistant
+        uses: phorus-group/ci-assistant-action@v1
+        with:
+          mode: ${{ steps.context.outputs.mode }}
+          failed-run-id: ${{ steps.context.outputs.failed-run-id }}
+          failed-branch: ${{ steps.context.outputs.failed-branch }}
+          failed-sha: ${{ steps.context.outputs.failed-sha }}
+          failed-pr-number: ${{ steps.context.outputs.failed-pr-number }}
+          comment-pr-number: ${{ steps.context.outputs.comment-pr-number }}
+          max-turns: ${{ inputs.max-turns }}
+          max-retries: ${{ inputs.max-retries }}
+          model: ${{ inputs.model }}
+          admin-users: ${{ inputs.admin-users }}
+          banned-users: ${{ inputs.banned-users }}
+          slack-failure-channel: ${{ inputs.slack-failure-channel }}
+          slack-thread-ts: ${{ inputs.slack-thread-ts }}
+          slack-bot-token: ${{ secrets.slack-bot-token }}
+          auto-fix-prompt: ${{ inputs.auto-fix-prompt }}
+          retry-prompt: ${{ inputs.retry-prompt }}
+          alternative-prompt: ${{ inputs.alternative-prompt }}
+          suggest-prompt: ${{ inputs.suggest-prompt }}
+          explain-prompt: ${{ inputs.explain-prompt }}
+          confidence-prompt: ${{ inputs.confidence-prompt }}
+        env:
+          CI_ASSISTANT_COMMENT_BODY: ${{ github.event.comment.body }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.claude-code-oauth-token }}
+          ANTHROPIC_API_KEY: ${{ secrets.anthropic-api-key }}
+          GH_TOKEN: ${{ github.token }}
+
+  auto-cleanup:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: phorus-group/ci-assistant-action@v1
+        with:
+          mode: cleanup
+          failed-branch: ${{ github.event.workflow_run.head_branch }}
+        env:
+          GH_TOKEN: ${{ github.token }}

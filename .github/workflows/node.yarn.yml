@@ -1,0 +1,214 @@
+name: Reusable workflow to build and test a Node.js yarn project
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: "Node version to use"
+        type: string
+        required: false
+        default: "22"
+      disable-unit-test:
+        description: "Disable unit testing job"
+        type: boolean
+        required: false
+        default: false
+      disable-integration-test:
+        description: "Disable integration testing job"
+        type: boolean
+        required: false
+        default: false
+      disable-dist-check:
+        description: "Disable the dist/ freshness check. Enable for projects that commit built artifacts (e.g. GitHub Actions)."
+        type: boolean
+        required: false
+        default: true
+      disable-vulnerability-analysis:
+        description: "Disable vulnerability analysis job"
+        type: boolean
+        required: false
+        default: false
+      gh-advanced-security:
+        description: "Enable if you have GitHub Advanced Security"
+        type: boolean
+        required: false
+        default: false
+      slack-failure-channel:
+        description: "Slack channel ID for pipeline failure notifications"
+        type: string
+        required: false
+        default: ""
+    secrets:
+      slack-bot-token:
+        description: "Slack Bot User OAuth Token (xoxb-...). Falls back to org/repo-level SLACK_BOT_TOKEN secret"
+        required: false
+      codecov-token:
+        description: "Codecov token for private repos"
+        required: false
+
+jobs:
+  notify-start:
+    name: Notify pipeline started
+    if: ${{ inputs.slack-failure-channel != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: phorus-group/slack-pipeline-notify-action@main
+        with:
+          slack-token: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
+          notifications-channel: ${{ inputs.slack-failure-channel }}
+          status: running
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Lint
+        run: yarn lint
+
+      - name: Build
+        run: yarn build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-build
+          include-hidden-files: true
+          retention-days: 2
+          path: |
+            ./dist
+            ./package.json
+
+  unit-test:
+    name: Unit tests
+    needs: [build]
+    if: ${{ !inputs.disable-unit-test }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run unit tests
+        uses: phorus-group/yarn-test-action@main
+        with:
+          command: test
+          test-label: Unit
+
+      - name: Upload to Codecov
+        if: ${{ !cancelled() && inputs.disable-integration-test }}
+        uses: codecov/codecov-action@v5
+        env:
+          CODECOV_TOKEN: ${{ secrets.codecov-token }}
+        with:
+          files: test/.coverage/coverage-final.json
+          token: ${{ secrets.codecov-token }}
+          fail_ci_if_error: false
+        continue-on-error: true
+
+  integration-test:
+    name: Integration tests
+    needs: [build]
+    if: ${{ !inputs.disable-integration-test }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run integration tests
+        uses: phorus-group/yarn-test-action@main
+        with:
+          command: test:integration
+          test-label: Integration
+          artifact-suffix: integration
+
+  merge-test-reports:
+    name: Merge test reports
+    if: ${{ !failure() && !cancelled() && !inputs.disable-unit-test && !inputs.disable-integration-test }}
+    needs: [unit-test, integration-test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge test reports
+        uses: phorus-group/yarn-merge-reports-action@main
+        with:
+          test-artifact-1: coverage-unit
+          test-artifact-2: coverage-integration
+          codecov-token: ${{ secrets.codecov-token }}
+
+  dist-check:
+    name: Verify dist/ is up to date
+    needs: [build]
+    if: ${{ !inputs.disable-dist-check }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Build
+        run: yarn build
+
+      - name: Check dist/ is up to date
+        run: |
+          if [[ -n "$(git diff --name-only dist/)" ]]; then
+            echo "::error::dist/ is out of date. Run 'yarn build' and commit the result."
+            git diff --stat dist/
+            exit 1
+          fi
+          echo "dist/ is up to date"
+
+  vulnerability-analysis:
+    name: Vulnerability analysis
+    needs: [build]
+    if: ${{ !inputs.disable-vulnerability-analysis }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Analyse project for vulnerabilities
+        uses: phorus-group/vulnerability-analysis-action@main
+        with:
+          skip-dirs: node_modules,.git
+          upload-sarif: ${{ inputs.gh-advanced-security }}
+
+  enforce-all-checks:
+    name: Enforce all checks
+    needs: [build, unit-test, integration-test, dist-check, vulnerability-analysis]
+    if: ${{ !failure() && !cancelled() && github.ref_name != github.event.repository.default_branch && github.event_name != 'release' }}
+    runs-on: ubuntu-latest
+    permissions:
+      checks: read
+    steps:
+      - name: Enforce all checks
+        uses: poseidon/wait-for-status-checks@main
+        with:
+          token: ${{ github.token }}
+          ignore_pattern: ".*Enforce all checks"
+
+  notify-end:
+    name: Notify pipeline finished
+    needs: [build, unit-test, integration-test, dist-check, vulnerability-analysis, enforce-all-checks]
+    if: ${{ always() && inputs.slack-failure-channel != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: phorus-group/slack-pipeline-notify-action@main
+        with:
+          slack-token: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
+          notifications-channel: ${{ inputs.slack-failure-channel }}
+          status: ${{ contains(needs.*.result, 'failure') && 'failure' || 'success' }}
