@@ -175,7 +175,7 @@ jobs:
             echo "checkout-ref=${PR_SHA}" >> $GITHUB_OUTPUT
           else
             echo "mode=manual" >> $GITHUB_OUTPUT
-            echo "failed-run-id=${{ inputs.run-id }}" >> $GITHUB_OUTPUT
+            echo "failed-run-id=${{ github.event.inputs.run-id }}" >> $GITHUB_OUTPUT
             echo "checkout-ref=" >> $GITHUB_OUTPUT
           fi
         env:
