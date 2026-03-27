@@ -18,68 +18,118 @@ on:
         type: string
         required: false
         default: ""
-      slack-failure-channel:
-        description: "Slack channel ID for fix notifications"
+      working-directory:
+        description: "Directory where Claude Code runs"
         type: string
         required: false
-        default: ""
-      slack-thread-ts:
-        description: "Slack thread timestamp to reply in"
-        type: string
-        required: false
-        default: ""
+        default: "."
       max-turns:
-        description: "Max Claude conversation turns per attempt"
+        description: "Max Claude conversation turns per attempt. Use -1 for unlimited."
         type: number
         required: false
-        default: 10
+        default: 50
       max-retries:
-        description: "Max retry attempts per run"
+        description: "Max retry attempts (each gets fresh max-turns budget)"
         type: number
         required: false
         default: 3
+      max-retry-commands:
+        description: "Max /ci-assistant retry commands per PR. Use -1 for unlimited."
+        type: number
+        required: false
+        default: 2
+      max-alternative-commands:
+        description: "Max /ci-assistant alternative commands per PR. Use -1 for unlimited."
+        type: number
+        required: false
+        default: 3
+      max-suggest-commands:
+        description: "Max /ci-assistant suggest commands per PR. Use -1 for unlimited."
+        type: number
+        required: false
+        default: 3
+      max-explain-commands:
+        description: "Max /ci-assistant explain commands per PR. Use -1 for unlimited."
+        type: number
+        required: false
+        default: 3
+      max-total-commands:
+        description: "Max total non-admin commands per PR. Use -1 for unlimited."
+        type: number
+        required: false
+        default: 20
       model:
-        description: "Claude model to use"
+        description: "Claude model to use (e.g. 'claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5-20251001')"
         type: string
         required: false
         default: "claude-sonnet-4-6"
+      skip-permissions:
+        description: "Pass --dangerously-skip-permissions to Claude Code. Safe in CI since the runner is ephemeral. Set to false to require permission checks."
+        type: boolean
+        required: false
+        default: true
+      allowed-tools:
+        description: "Comma-separated list of tools Claude Code can use (e.g. 'Bash,Edit,Read,Write,WebSearch'). Empty means all tools available."
+        type: string
+        required: false
+        default: ""
+      disallowed-tools:
+        description: "Comma-separated list of tools Claude Code cannot use (e.g. 'WebSearch,WebFetch'). Takes precedence over allowed-tools."
+        type: string
+        required: false
+        default: ""
+      append-system-prompt:
+        description: "Additional system prompt appended to Claude Code's default system prompt. Use for project-specific instructions not covered by CLAUDE.md."
+        type: string
+        required: false
+        default: ""
       admin-users:
-        description: "Comma-separated GitHub usernames with admin access"
+        description: "Comma-separated GitHub usernames of admin users (e.g. user1,user2)"
         type: string
         required: false
         default: ""
       banned-users:
-        description: "Comma-separated GitHub usernames banned from CI Assistant"
+        description: "Comma-separated GitHub usernames permanently banned from using CI Assistant"
+        type: string
+        required: false
+        default: ""
+      slack-failure-channel:
+        description: "Slack channel ID for fix notifications (optional, everything works without Slack)"
+        type: string
+        required: false
+        default: ""
+      slack-thread-ts:
+        description: "Slack thread timestamp to post as a reply (optional)"
         type: string
         required: false
         default: ""
       auto-fix-prompt:
-        description: "Prompt template for automatic fix attempts"
+        description: "Prompt template for automatic fix attempts. Placeholders: {{FAILURE_LOGS}}, {{REPO}}, {{BRANCH}}, {{SHA}}, {{CONVERSATION_HISTORY}}, {{REPRODUCTION_OUTPUT}}"
         type: string
         required: false
         default: ""
       retry-prompt:
-        description: "Prompt template for retry attempts"
+        description: "Prompt template for retry attempts. Placeholders: {{FAILURE_LOGS}}, {{PREVIOUS_ATTEMPTS}}, {{REPRODUCTION_OUTPUT}}, {{REPO}}, {{BRANCH}}, {{SHA}}, {{CONVERSATION_HISTORY}}"
         type: string
         required: false
         default: ""
       alternative-prompt:
-        description: "Prompt template for alternative suggestions"
+        description: "Prompt template for alternative suggestions. Placeholders: {{FAILURE_LOGS}}, {{PREVIOUS_SUGGESTIONS}}, {{REPO}}, {{BRANCH}}, {{SHA}}, {{CONVERSATION_HISTORY}}"
         type: string
         required: false
         default: ""
       suggest-prompt:
-        description: "Prompt template for suggest commands"
+        description: "Prompt template for suggest commands. Placeholders: {{USER_CONTEXT}}, {{FAILURE_LOGS_IF_AVAILABLE}}, {{CONVERSATION_HISTORY}}, {{REPO}}, {{BRANCH}}, {{SHA}}"
         type: string
         required: false
         default: ""
       explain-prompt:
-        description: "Prompt template for explain commands"
+        description: "Prompt template for explain commands. Placeholders: {{USER_PROMPT}}, {{FAILURE_LOGS_IF_AVAILABLE}}, {{LATEST_FIX_DIFF}}, {{CONVERSATION_HISTORY}}, {{REPO}}, {{BRANCH}}"
         type: string
         required: false
         default: ""
       confidence-prompt:
-        description: "Prompt template for confidence analysis"
+        description: "Prompt appended to fix prompts for confidence analysis. Placeholders: {{FAILURE_LOGS}}, {{REPRODUCTION_OUTPUT}}, {{FIX_DIFF}}, {{POST_FIX_TEST_OUTPUT}}, {{PREVIOUS_SUGGESTIONS}}, {{USER_CONTEXT}}"
         type: string
         required: false
         default: ""
@@ -151,6 +201,7 @@ jobs:
         uses: phorus-group/ci-assistant-action@v1
         with:
           mode: ${{ steps.context.outputs.mode }}
+          working-directory: ${{ inputs.working-directory }}
           failed-run-id: ${{ steps.context.outputs.failed-run-id }}
           failed-branch: ${{ steps.context.outputs.failed-branch }}
           failed-sha: ${{ steps.context.outputs.failed-sha }}
@@ -158,7 +209,16 @@ jobs:
           comment-pr-number: ${{ steps.context.outputs.comment-pr-number }}
           max-turns: ${{ inputs.max-turns }}
           max-retries: ${{ inputs.max-retries }}
+          max-retry-commands: ${{ inputs.max-retry-commands }}
+          max-alternative-commands: ${{ inputs.max-alternative-commands }}
+          max-suggest-commands: ${{ inputs.max-suggest-commands }}
+          max-explain-commands: ${{ inputs.max-explain-commands }}
+          max-total-commands: ${{ inputs.max-total-commands }}
           model: ${{ inputs.model }}
+          skip-permissions: ${{ inputs.skip-permissions }}
+          allowed-tools: ${{ inputs.allowed-tools }}
+          disallowed-tools: ${{ inputs.disallowed-tools }}
+          append-system-prompt: ${{ inputs.append-system-prompt }}
           admin-users: ${{ inputs.admin-users }}
           banned-users: ${{ inputs.banned-users }}
           slack-failure-channel: ${{ inputs.slack-failure-channel }}
