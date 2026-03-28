@@ -131,7 +131,7 @@ jobs:
     steps:
       - uses: phorus-group/slack-pipeline-notify-action@main
         with:
-          slack-token: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
+          slack-token: ${{ secrets.slack-bot-token }}
           notifications-channel: ${{ inputs.slack-failure-channel }}
           status: running
           releases-channel: ${{ inputs.slack-releases-channel }}
@@ -250,9 +250,8 @@ jobs:
           java-distribution: ${{ inputs.java-distribution }}
           build-and-test: ${{ inputs.build-and-test }}
           codecov-token: ${{ secrets.codecov-token }}
-        env:
-          ORG_GRADLE_PROJECT_readUsername: ${{ inputs.registry-username || github.actor }}
-          ORG_GRADLE_PROJECT_readPassword: ${{ secrets.read-auth-value || github.token }}
+          registry-username: ${{ inputs.registry-username || github.actor }}
+          registry-password: ${{ secrets.read-auth-value || github.token }}
 
   unit-test:
     name: Unit tests
@@ -271,9 +270,8 @@ jobs:
           commands: check unitTest -x :test
           artifact-suffix: unit
           codecov-token: ${{ inputs.disable-integration-test && secrets.codecov-token || '' }}
-        env:
-          ORG_GRADLE_PROJECT_readUsername: ${{ inputs.registry-username || github.actor }}
-          ORG_GRADLE_PROJECT_readPassword: ${{ secrets.read-auth-value || github.token }}
+          registry-username: ${{ inputs.registry-username || github.actor }}
+          registry-password: ${{ secrets.read-auth-value || github.token }}
 
   integration-test:
     name: Integration tests
@@ -292,9 +290,8 @@ jobs:
           commands: integrationTest
           artifact-suffix: integration
           codecov-token: ${{ inputs.disable-unit-test && secrets.codecov-token || '' }}
-        env:
-          ORG_GRADLE_PROJECT_readUsername: ${{ inputs.registry-username || github.actor }}
-          ORG_GRADLE_PROJECT_readPassword: ${{ secrets.read-auth-value || github.token }}
+          registry-username: ${{ inputs.registry-username || github.actor }}
+          registry-password: ${{ secrets.read-auth-value || github.token }}
 
   merge-test-reports:
     name: Merge test reports
@@ -417,7 +414,7 @@ jobs:
     steps:
       - uses: phorus-group/slack-pipeline-notify-action@main
         with:
-          slack-token: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
+          slack-token: ${{ secrets.slack-bot-token }}
           notifications-channel: ${{ inputs.slack-failure-channel }}
           status: ${{ contains(needs.*.result, 'failure') && 'failure' || 'success' }}
           releases-channel: ${{ inputs.slack-releases-channel }}

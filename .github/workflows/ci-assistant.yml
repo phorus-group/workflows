@@ -140,6 +140,12 @@ on:
         required: false
       slack-bot-token:
         required: false
+      github-app-id:
+        description: "GitHub App ID for custom bot identity (optional, falls back to github-actions[bot])"
+        required: false
+      github-app-private-key:
+        description: "GitHub App private key for custom bot identity (optional)"
+        required: false
 
 jobs:
   ci-assistant:
@@ -157,6 +163,14 @@ jobs:
       actions: read
       issues: write
     steps:
+      - name: Generate GitHub App token
+        if: secrets.github-app-id != ''
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.github-app-id }}
+          private-key: ${{ secrets.github-app-private-key }}
+
       - name: Determine mode and context
         id: context
         run: |
@@ -179,7 +193,7 @@ jobs:
             echo "checkout-ref=" >> $GITHUB_OUTPUT
           fi
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
 
       - uses: actions/checkout@v4
         with:
@@ -230,11 +244,10 @@ jobs:
           suggest-prompt: ${{ inputs.suggest-prompt }}
           explain-prompt: ${{ inputs.explain-prompt }}
           confidence-prompt: ${{ inputs.confidence-prompt }}
-        env:
-          CI_ASSISTANT_COMMENT_BODY: ${{ github.event.comment.body }}
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.claude-code-oauth-token }}
-          ANTHROPIC_API_KEY: ${{ secrets.anthropic-api-key }}
-          GH_TOKEN: ${{ github.token }}
+          github-token: ${{ steps.app-token.outputs.token }}
+          claude-code-oauth-token: ${{ secrets.claude-code-oauth-token }}
+          anthropic-api-key: ${{ secrets.anthropic-api-key }}
+          comment-body: ${{ github.event.comment.body }}
 
   auto-cleanup:
     if: >-
@@ -245,9 +258,16 @@ jobs:
       contents: write
       pull-requests: write
     steps:
+      - name: Generate GitHub App token
+        if: secrets.github-app-id != ''
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.github-app-id }}
+          private-key: ${{ secrets.github-app-private-key }}
+
       - uses: phorus-group/ci-assistant-action@v1
         with:
           mode: cleanup
           failed-branch: ${{ github.event.workflow_run.head_branch }}
-        env:
-          GH_TOKEN: ${{ github.token }}
+          github-token: ${{ steps.app-token.outputs.token }}

@@ -373,7 +373,7 @@ jobs:
       - name: Build Slack message with contributor mentions
         id: slack-message
         env:
-          SLACK_TOKEN: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
+          SLACK_TOKEN: ${{ secrets.slack-bot-token }}
           CHANGELOG: ${{ needs.draft-release.outputs.changelog }}
         run: |
           CONTRIBUTORS="${{ needs.draft-release.outputs.contributors }}"
@@ -437,7 +437,7 @@ jobs:
         uses: slackapi/slack-github-action@v2.0.0
         with:
           method: chat.postMessage
-          token: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
+          token: ${{ secrets.slack-bot-token }}
           payload: |
             channel: "${{ inputs.slack-releases-channel }}"
             unfurl_links: false
@@ -468,7 +468,7 @@ jobs:
 
       - name: Post changelog in thread
         env:
-          SLACK_TOKEN: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
+          SLACK_TOKEN: ${{ secrets.slack-bot-token }}
           SLACK_CHANGELOG: ${{ steps.slack-message.outputs.slack_changelog }}
           CHANNEL: ${{ inputs.slack-releases-channel }}
           SLACK_POST_RESPONSE: ${{ steps.slack-post.outputs.response }}

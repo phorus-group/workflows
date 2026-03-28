@@ -46,7 +46,7 @@ jobs:
         if: ${{ inputs.registry-scope != '' }}
         run: |
           echo "${{ inputs.registry-scope }}:registry=https://${{ inputs.private-registry }}" >> ~/.npmrc
-          echo "//${{ inputs.private-registry }}/:_${{ inputs.auth-key }}=${{ secrets.auth-value || secrets.PACKAGES_READ }}" >> ~/.npmrc
+          echo "//${{ inputs.private-registry }}/:_${{ inputs.auth-key }}=${{ secrets.auth-value }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
 
       - name: Install dependencies
@@ -55,6 +55,6 @@ jobs:
       - name: Run Chromatic
         uses: chromaui/action@v11.17.0
         with:
-          projectToken: ${{ secrets.token || secrets.CHROMATIC_PROJECT_TOKEN }}
+          projectToken: ${{ secrets.token }}
           onlyChanged: true
           externals: public/**

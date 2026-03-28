@@ -49,7 +49,7 @@ jobs:
     steps:
       - uses: phorus-group/slack-pipeline-notify-action@main
         with:
-          slack-token: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
+          slack-token: ${{ secrets.slack-bot-token }}
           notifications-channel: ${{ inputs.slack-failure-channel }}
           status: running
 
@@ -175,6 +175,6 @@ jobs:
     steps:
       - uses: phorus-group/slack-pipeline-notify-action@main
         with:
-          slack-token: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
+          slack-token: ${{ secrets.slack-bot-token }}
           notifications-channel: ${{ inputs.slack-failure-channel }}
           status: ${{ contains(needs.*.result, 'failure') && 'failure' || 'success' }}

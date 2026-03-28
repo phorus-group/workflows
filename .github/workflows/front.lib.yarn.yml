@@ -110,7 +110,7 @@ jobs:
     steps:
       - uses: phorus-group/slack-pipeline-notify-action@main
         with:
-          slack-token: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
+          slack-token: ${{ secrets.slack-bot-token }}
           notifications-channel: ${{ inputs.slack-failure-channel }}
           status: running
           releases-channel: ${{ inputs.slack-releases-channel }}
@@ -201,11 +201,11 @@ jobs:
 
       - name: Configure npm registry globally in ~/.npmrc to download dependencies from the same scope as the project
         env:
-          AUTH_VALUE: ${{ secrets.read-auth-value || secrets.PACKAGES_READ }}
+          AUTH_VALUE: ${{ secrets.read-auth-value }}
         if: ${{ env.AUTH_VALUE != '' }}
         run: |
           echo "${{ needs.resolve-package-info.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
-          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ secrets.read-auth-value || secrets.PACKAGES_READ }}" >> ~/.npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ secrets.read-auth-value }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
 
       - name: Install dependencies
@@ -238,11 +238,11 @@ jobs:
 
       - name: Configure npm registry globally in ~/.npmrc to download dependencies from the same scope as the project
         env:
-          AUTH_VALUE: ${{ secrets.read-auth-value || secrets.PACKAGES_READ }}
+          AUTH_VALUE: ${{ secrets.read-auth-value }}
         if: ${{ env.AUTH_VALUE != '' }}
         run: |
           echo "${{ needs.resolve-package-info.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
-          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ secrets.read-auth-value || secrets.PACKAGES_READ }}" >> ~/.npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ secrets.read-auth-value }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
 
       - name: Run unit-tests
@@ -311,11 +311,11 @@ jobs:
 
       - name: Configure npm registry globally in ~/.npmrc to download dependencies from the same scope as the project
         env:
-          AUTH_VALUE: ${{ secrets.read-auth-value || secrets.PACKAGES_READ }}
+          AUTH_VALUE: ${{ secrets.read-auth-value }}
         if: ${{ env.AUTH_VALUE != '' }}
         run: |
           echo "${{ needs.resolve-package-info.outputs.package-scope }}:registry=https://${{ inputs.registry }}" >> ~/.npmrc
-          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ secrets.read-auth-value || secrets.PACKAGES_READ }}" >> ~/.npmrc
+          echo "//${{ inputs.registry }}/:_${{ inputs.auth-key }}=${{ secrets.read-auth-value }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
 
       - name: Run integration-tests
@@ -415,7 +415,7 @@ jobs:
     steps:
       - uses: phorus-group/slack-pipeline-notify-action@main
         with:
-          slack-token: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
+          slack-token: ${{ secrets.slack-bot-token }}
           notifications-channel: ${{ inputs.slack-failure-channel }}
           status: ${{ contains(needs.*.result, 'failure') && 'failure' || 'success' }}
           releases-channel: ${{ inputs.slack-releases-channel }}

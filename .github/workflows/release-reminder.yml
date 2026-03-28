@@ -112,7 +112,7 @@ jobs:
       - name: Send Slack reminder
         if: ${{ fromJSON(steps.changes.outputs.count) >= inputs.min-commits }}
         env:
-          SLACK_TOKEN: ${{ secrets.slack-bot-token || secrets.SLACK_BOT_TOKEN }}
+          SLACK_TOKEN: ${{ secrets.slack-bot-token }}
           CHANNEL: ${{ inputs.slack-releases-channel }}
           CHANGELOG: ${{ steps.changelog.outputs.changelog }}
         run: |
