@@ -1,0 +1,249 @@
+name: Reusable workflow to clean up old Docker packages from GHCR
+
+on:
+  workflow_call:
+    inputs:
+      package-name:
+        description: "Package name in GHCR (defaults to repository name)"
+        type: string
+        required: false
+        default: ""
+      keep-n-latest:
+        description: "Number of most recent images to keep per active branch"
+        type: number
+        required: false
+        default: 5
+      dry-run:
+        description: "Log what would be deleted without actually deleting"
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  cleanup:
+    name: Clean up old Docker packages
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - name: Clean up GHCR packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_NAME: ${{ inputs.package-name || github.event.repository.name }}
+          KEEP_N: ${{ inputs.keep-n-latest }}
+          DRY_RUN: ${{ inputs.dry-run }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          deleted_count=0
+          kept_count=0
+          orphan_count=0
+          branch_summary=""
+          errors=""
+
+          echo "## Docker Package Cleanup" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Package:** \`${PACKAGE_NAME}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Keep per branch:** ${KEEP_N}" >> $GITHUB_STEP_SUMMARY
+          echo "**Dry run:** ${DRY_RUN}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Fetch all package versions (paginated)
+          echo "Fetching package versions..."
+          versions=$(gh api --paginate "/orgs/${OWNER}/packages/container/${PACKAGE_NAME}/versions" 2>/dev/null || echo "[]")
+
+          total=$(echo "$versions" | jq 'length')
+          if [[ "$total" == "0" ]]; then
+            echo "No package versions found for ${PACKAGE_NAME}."
+            echo "No package versions found." >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+          echo "Found ${total} package version(s)."
+
+          # Fetch all branches
+          echo "Fetching branches..."
+          branches=$(gh api --paginate "repos/${REPO}/branches" --jq '.[].name' 2>/dev/null || echo "")
+          branch_list=$(echo "$branches" | tr '\n' '|')
+
+          # Group versions by branch using their SHA tags
+          # Tags are: short SHA (always), "latest" (main only)
+          # We resolve each SHA to its branch(es)
+
+          # Build a map: version_id -> tags, created_at
+          version_data=$(echo "$versions" | jq -r '.[] | "\(.id)\t\(.metadata.container.tags | join(","))\t\(.created_at)"')
+
+          declare -A branch_versions  # branch -> list of "created_at:version_id"
+          declare -a orphan_versions   # versions whose SHA matches no existing branch
+
+          while IFS=$'\t' read -r vid tags created_at; do
+            [[ -z "$vid" ]] && continue
+
+            # Extract SHA tag (7-char hex, not "latest")
+            sha=""
+            for tag in $(echo "$tags" | tr ',' ' '); do
+              if [[ "$tag" =~ ^[0-9a-f]{7,}$ && "$tag" != "latest" ]]; then
+                sha="$tag"
+                break
+              fi
+            done
+
+            if [[ -z "$sha" ]]; then
+              # No SHA tag (e.g., untagged or only "latest")
+              # If it has "latest" tag, keep it (it's the current main image)
+              if echo "$tags" | grep -qw "latest"; then
+                kept_count=$((kept_count + 1))
+                continue
+              fi
+              # Untagged image, treat as orphan
+              orphan_versions+=("${vid}")
+              orphan_count=$((orphan_count + 1))
+              continue
+            fi
+
+            # Resolve SHA to branch(es)
+            commit_branches=$(gh api "repos/${REPO}/commits/${sha}/branches-where-head" --jq '.[].name' 2>/dev/null || echo "")
+
+            if [[ -z "$commit_branches" ]]; then
+              # SHA doesn't match HEAD of any branch, check if commit exists at all
+              # and find branches that contain it
+              commit_branches=$(gh api "repos/${REPO}/commits/${sha}" --jq '.sha' 2>/dev/null || echo "")
+              if [[ -z "$commit_branches" ]]; then
+                # Commit doesn't exist anymore (force-pushed away)
+                orphan_versions+=("${vid}")
+                orphan_count=$((orphan_count + 1))
+                continue
+              fi
+
+              # Commit exists but isn't HEAD of any branch
+              # Check if any branch contains this commit
+              found_branch=""
+              while IFS= read -r branch; do
+                [[ -z "$branch" ]] && continue
+                if gh api "repos/${REPO}/compare/${branch}...${sha}" --jq '.status' 2>/dev/null | grep -q "behind\|identical"; then
+                  found_branch="$branch"
+                  break
+                fi
+              done <<< "$branches"
+
+              if [[ -z "$found_branch" ]]; then
+                orphan_versions+=("${vid}")
+                orphan_count=$((orphan_count + 1))
+                continue
+              fi
+              commit_branches="$found_branch"
+            fi
+
+            # Add to branch map (use first matching branch)
+            branch=$(echo "$commit_branches" | head -1)
+            branch_versions["$branch"]+="${created_at}:${vid} "
+
+          done <<< "$version_data"
+
+          # Process each branch: sort by date, keep N most recent, delete the rest
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Per-branch retention" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | Total | Kept | Deleted |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|---|---|" >> $GITHUB_STEP_SUMMARY
+
+          for branch in "${!branch_versions[@]}"; do
+            # Check if branch still exists
+            branch_exists=false
+            if echo "$branches" | grep -qx "$branch"; then
+              branch_exists=true
+            fi
+
+            # Sort versions by date (newest first)
+            sorted=$(echo "${branch_versions[$branch]}" | tr ' ' '\n' | sort -r | grep -v '^$')
+            branch_total=$(echo "$sorted" | wc -l)
+
+            if [[ "$branch_exists" == "true" ]]; then
+              # Keep N most recent
+              to_keep=$(echo "$sorted" | head -n "$KEEP_N")
+              to_delete=$(echo "$sorted" | tail -n +"$((KEEP_N + 1))")
+              branch_kept=$(echo "$to_keep" | grep -c . || true)
+              branch_deleted=0
+
+              while IFS= read -r entry; do
+                [[ -z "$entry" ]] && continue
+                vid="${entry#*:}"
+                if [[ "$DRY_RUN" == "true" ]]; then
+                  echo "[DRY RUN] Would delete version ${vid} from branch ${branch}"
+                else
+                  if gh api --method DELETE "/orgs/${OWNER}/packages/container/${PACKAGE_NAME}/versions/${vid}" 2>/dev/null; then
+                    echo "Deleted version ${vid} from branch ${branch}"
+                  else
+                    errors+="Failed to delete version ${vid}\n"
+                  fi
+                fi
+                deleted_count=$((deleted_count + 1))
+                branch_deleted=$((branch_deleted + 1))
+              done <<< "$to_delete"
+
+              kept_count=$((kept_count + branch_kept))
+              echo "| \`${branch}\` | ${branch_total} | ${branch_kept} | ${branch_deleted} |" >> $GITHUB_STEP_SUMMARY
+            else
+              # Branch deleted, remove all versions
+              while IFS= read -r entry; do
+                [[ -z "$entry" ]] && continue
+                vid="${entry#*:}"
+                if [[ "$DRY_RUN" == "true" ]]; then
+                  echo "[DRY RUN] Would delete version ${vid} (branch ${branch} no longer exists)"
+                else
+                  if gh api --method DELETE "/orgs/${OWNER}/packages/container/${PACKAGE_NAME}/versions/${vid}" 2>/dev/null; then
+                    echo "Deleted version ${vid} (branch ${branch} no longer exists)"
+                  else
+                    errors+="Failed to delete version ${vid}\n"
+                  fi
+                fi
+                deleted_count=$((deleted_count + 1))
+              done <<< "$sorted"
+
+              echo "| ~~\`${branch}\`~~ (deleted) | ${branch_total} | 0 | ${branch_total} |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+          # Delete orphan versions (no branch association)
+          if [[ ${#orphan_versions[@]} -gt 0 ]]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Orphaned images" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Found **${orphan_count}** orphaned image(s) (commit no longer exists or untagged)." >> $GITHUB_STEP_SUMMARY
+
+            for vid in "${orphan_versions[@]}"; do
+              if [[ "$DRY_RUN" == "true" ]]; then
+                echo "[DRY RUN] Would delete orphaned version ${vid}"
+              else
+                if gh api --method DELETE "/orgs/${OWNER}/packages/container/${PACKAGE_NAME}/versions/${vid}" 2>/dev/null; then
+                  echo "Deleted orphaned version ${vid}"
+                else
+                  errors+="Failed to delete orphaned version ${vid}\n"
+                fi
+              fi
+              deleted_count=$((deleted_count + 1))
+            done
+          fi
+
+          # Summary
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Total versions found | ${total} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Kept | ${kept_count} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deleted | ${deleted_count} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Orphaned | ${orphan_count} |" >> $GITHUB_STEP_SUMMARY
+
+          if [[ -n "$errors" ]]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Errors" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo -e "$errors" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo ""
+          echo "Cleanup complete: ${deleted_count} deleted, ${kept_count} kept, ${orphan_count} orphaned"
