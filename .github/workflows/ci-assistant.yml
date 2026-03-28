@@ -154,7 +154,8 @@ jobs:
     if: >-
       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.repository.full_name == github.repository) ||
       (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/ci-assistant') && github.event.issue.pull_request && github.event.comment.user.type != 'Bot') ||
-      github.event_name == 'workflow_dispatch'
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule'
     runs-on: ubuntu-latest
     concurrency:
       group: ci-assistant-${{ github.event.issue.number || github.event.workflow_run.head_branch || 'manual' }}
@@ -189,6 +190,9 @@ jobs:
             echo "comment-pr-number=${{ github.event.issue.number }}" >> $GITHUB_OUTPUT
             PR_SHA=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number }} --jq '.head.sha')
             echo "checkout-ref=${PR_SHA}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "schedule" ]]; then
+            echo "mode=cleanup" >> $GITHUB_OUTPUT
+            echo "checkout-ref=" >> $GITHUB_OUTPUT
           else
             echo "mode=manual" >> $GITHUB_OUTPUT
             echo "failed-run-id=${{ github.event.inputs.run-id }}" >> $GITHUB_OUTPUT
@@ -250,26 +254,3 @@ jobs:
           claude-code-oauth-token: ${{ secrets.claude-code-oauth-token }}
           anthropic-api-key: ${{ secrets.anthropic-api-key }}
           comment-body: ${{ github.event.comment.body }}
-
-  auto-cleanup:
-    if: >-
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.conclusion == 'success'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      - name: Generate GitHub App token
-        if: ${{ inputs.github-app-id != '' }}
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ inputs.github-app-id }}
-          private-key: ${{ secrets.github-app-private-key }}
-
-      - uses: phorus-group/ci-assistant-action@v1
-        with:
-          mode: cleanup
-          failed-branch: ${{ github.event.workflow_run.head_branch }}
-          github-token: ${{ steps.app-token.outputs.token }}
