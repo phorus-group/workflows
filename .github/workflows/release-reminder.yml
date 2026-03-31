@@ -88,13 +88,16 @@ jobs:
 
             PR_ENTRY=$(echo "$PR_MAP" | jq -c --arg sha "$sha" '.[$sha] // empty' 2>/dev/null)
 
+            COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${sha}"
+
             if [[ -n "$PR_ENTRY" ]]; then
               PR_NUM=$(echo "$PR_ENTRY" | jq -r '.num')
               PR_TITLE=$(echo "$PR_ENTRY" | jq -r '.title')
               PR_AUTHOR=$(echo "$PR_ENTRY" | jq -r '.author')
-              CHANGELOG+="- *PR #${PR_NUM}:* ${PR_TITLE} by ${PR_AUTHOR}\n"
+              PR_URL=$(echo "$PR_ENTRY" | jq -r '.url')
+              CHANGELOG+="- *<${PR_URL}|PR #${PR_NUM}>:* ${PR_TITLE} by ${PR_AUTHOR}\n"
             else
-              CHANGELOG+="- *\`${SHORT_SHA}\`:* ${subject} by ${author}\n"
+              CHANGELOG+="- *<${COMMIT_URL}|\`${SHORT_SHA}\`>:* ${subject} by ${author}\n"
             fi
             ENTRY_COUNT=$((ENTRY_COUNT + 1))
           done <<< "$TIMELINE"
@@ -130,18 +133,16 @@ jobs:
             --arg repo "$REPO" \
             --arg count "$COUNT" \
             --arg since "$SINCE_TEXT" \
-            --arg changelog "$CHANGELOG" \
             --arg draft_url "$DRAFT_URL" \
             '[
               {type: "section", text: {type: "mrkdwn", text: (":package: *Release reminder* for `" + $repo + "`\n" + $count + " unreleased change(s)" + $since)}},
-              {type: "section", text: {type: "mrkdwn", text: $changelog}},
               {type: "context", elements: [{type: "mrkdwn", text: "Before releasing, make sure the version in the build file is set correctly based on the changes and follows <https://semver.org|Semantic Versioning> conventions."}]},
               {type: "actions", elements: [
                 {type: "button", text: {type: "plain_text", text: "Create Draft Release"}, url: $draft_url, style: "primary"}
               ]}
             ]')
 
-          curl -s -X POST "https://slack.com/api/chat.postMessage" \
+          RESPONSE=$(curl -s -X POST "https://slack.com/api/chat.postMessage" \
             -H "Authorization: Bearer $SLACK_TOKEN" \
             -H "Content-Type: application/json" \
             -d "$(jq -n \
@@ -149,7 +150,20 @@ jobs:
               --argjson blocks "$BLOCKS" \
               --arg repo "$REPO" \
               --arg count "$COUNT" \
-              '{channel: $channel, blocks: $blocks, text: ("Release reminder: " + $count + " unreleased changes in " + $repo), unfurl_links: false, unfurl_media: false}')" > /dev/null
+              '{channel: $channel, blocks: $blocks, text: ("Release reminder: " + $count + " unreleased changes in " + $repo), unfurl_links: false, unfurl_media: false}')")
+
+          THREAD_TS=$(echo "$RESPONSE" | jq -r '.ts // empty')
+
+          if [[ -n "$THREAD_TS" && -n "$CHANGELOG" ]]; then
+            curl -s -X POST "https://slack.com/api/chat.postMessage" \
+              -H "Authorization: Bearer $SLACK_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -n \
+                --arg channel "$CHANNEL" \
+                --arg thread_ts "$THREAD_TS" \
+                --arg text "$CHANGELOG" \
+                '{channel: $channel, thread_ts: $thread_ts, text: $text, unfurl_links: false, unfurl_media: false}')" > /dev/null
+          fi
 
           echo "Reminder sent: $COUNT unreleased changes in $REPO"
 
