@@ -40,14 +40,21 @@ on:
       codecov-token:
         description: "Codecov token for private repos"
         required: false
+    outputs:
+      slack-failure-thread-ts:
+        description: "Slack thread timestamp for the failure notification message"
+        value: ${{ jobs.notify-end.outputs.notifications-thread-ts || jobs.notify-start.outputs.notifications-thread-ts }}
 
 jobs:
   notify-start:
     name: Notify pipeline started
     if: ${{ inputs.slack-failure-channel != '' }}
     runs-on: ubuntu-latest
+    outputs:
+      notifications-thread-ts: ${{ steps.slack.outputs.notifications-thread-ts }}
     steps:
       - uses: phorus-group/slack-pipeline-notify-action@main
+        id: slack
         with:
           slack-token: ${{ secrets.slack-bot-token }}
           notifications-channel: ${{ inputs.slack-failure-channel }}
@@ -172,8 +179,11 @@ jobs:
     needs: [build, unit-test, integration-test, vulnerability-analysis, enforce-all-checks]
     if: ${{ always() && inputs.slack-failure-channel != '' }}
     runs-on: ubuntu-latest
+    outputs:
+      notifications-thread-ts: ${{ steps.slack.outputs.notifications-thread-ts }}
     steps:
       - uses: phorus-group/slack-pipeline-notify-action@main
+        id: slack
         with:
           slack-token: ${{ secrets.slack-bot-token }}
           notifications-channel: ${{ inputs.slack-failure-channel }}

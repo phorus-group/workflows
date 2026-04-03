@@ -101,14 +101,24 @@ on:
       package-version:
         description: "The package version"
         value: ${{ jobs.resolve-package-info.outputs.package-version }}
+      slack-failure-thread-ts:
+        description: "Slack thread timestamp for the failure notification message"
+        value: ${{ jobs.notify-end.outputs.notifications-thread-ts || jobs.notify-start.outputs.notifications-thread-ts }}
+      slack-releases-thread-ts:
+        description: "Slack thread timestamp for the releases notification message"
+        value: ${{ jobs.notify-end.outputs.releases-thread-ts || jobs.notify-start.outputs.releases-thread-ts }}
 
 jobs:
   notify-start:
     name: Notify pipeline started
     if: ${{ inputs.slack-failure-channel != '' || inputs.slack-releases-channel != '' }}
     runs-on: ubuntu-latest
+    outputs:
+      notifications-thread-ts: ${{ steps.slack.outputs.notifications-thread-ts }}
+      releases-thread-ts: ${{ steps.slack.outputs.releases-thread-ts }}
     steps:
       - uses: phorus-group/slack-pipeline-notify-action@main
+        id: slack
         with:
           slack-token: ${{ secrets.slack-bot-token }}
           notifications-channel: ${{ inputs.slack-failure-channel }}
@@ -412,8 +422,12 @@ jobs:
     needs: [build, unit-test, integration-test, vulnerability-analysis, publish, enforce-all-checks]
     if: ${{ always() && (inputs.slack-failure-channel != '' || inputs.slack-releases-channel != '') }}
     runs-on: ubuntu-latest
+    outputs:
+      notifications-thread-ts: ${{ steps.slack.outputs.notifications-thread-ts }}
+      releases-thread-ts: ${{ steps.slack.outputs.releases-thread-ts }}
     steps:
       - uses: phorus-group/slack-pipeline-notify-action@main
+        id: slack
         with:
           slack-token: ${{ secrets.slack-bot-token }}
           notifications-channel: ${{ inputs.slack-failure-channel }}
