@@ -133,6 +133,11 @@ on:
         type: string
         required: false
         default: ""
+      cleanup:
+        description: "Force cleanup mode (close recovered PRs, delete stale branches). Use this from scheduled triggers that only need housekeeping."
+        type: boolean
+        required: false
+        default: false
       github-app-id:
         description: "GitHub App ID for custom bot identity (optional, falls back to github-actions[bot])"
         type: string
@@ -180,7 +185,10 @@ jobs:
       - name: Determine mode and context
         id: context
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+          if [[ "${{ inputs.cleanup }}" == "true" ]]; then
+            echo "mode=cleanup" >> $GITHUB_OUTPUT
+            echo "checkout-ref=" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "workflow_run" ]]; then
             echo "mode=auto-fix" >> $GITHUB_OUTPUT
             echo "checkout-ref=${{ github.event.workflow_run.head_sha }}" >> $GITHUB_OUTPUT
             echo "failed-run-id=${{ github.event.workflow_run.id }}" >> $GITHUB_OUTPUT
@@ -193,10 +201,7 @@ jobs:
             echo "comment-pr-number=${{ github.event.issue.number }}" >> $GITHUB_OUTPUT
             PR_SHA=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number }} --jq '.head.sha')
             echo "checkout-ref=${PR_SHA}" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.event_name }}" == "schedule" ]]; then
-            echo "mode=cleanup" >> $GITHUB_OUTPUT
-            echo "checkout-ref=" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.event_name }}" == "push" || "${{ github.event_name }}" == "pull_request" || "${{ github.event_name }}" == "release" ]]; then
+          elif [[ "${{ github.event_name }}" == "push" || "${{ github.event_name }}" == "pull_request" || "${{ github.event_name }}" == "release" || "${{ github.event_name }}" == "schedule" ]]; then
             BRANCH="${{ github.head_ref || github.ref_name }}"
             SHA="${{ github.event.pull_request.head.sha || github.sha }}"
             echo "mode=auto-fix" >> $GITHUB_OUTPUT
