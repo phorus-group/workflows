@@ -403,10 +403,10 @@ jobs:
 
             if [[ -n "$SLACK_ID" ]]; then
               MENTIONS+="<@${SLACK_ID}> "
-              MENTION_SED+="s/@${gh_user}/<@${SLACK_ID}>/g;"
+              MENTION_SED+="s|@${gh_user}|<@${SLACK_ID}>|g;"
             else
               MENTIONS+="<https://github.com/${gh_user}|${gh_user}> "
-              MENTION_SED+="s/@${gh_user}/<https:\/\/github.com\/${gh_user}|${gh_user}>/g;"
+              MENTION_SED+="s|@${gh_user}|<https://github.com/${gh_user}\|${gh_user}>|g;"
             fi
           done
 
