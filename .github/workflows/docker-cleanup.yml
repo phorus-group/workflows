@@ -30,6 +30,7 @@ jobs:
       - name: Clean up GHCR packages
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_ACTOR: ${{ github.actor }}
           PACKAGE_NAME: ${{ inputs.package-name || github.event.repository.name }}
           KEEP_N: ${{ inputs.keep-n-latest }}
           DRY_RUN: ${{ inputs.dry-run }}
@@ -75,8 +76,26 @@ jobs:
           # Build a map: version_id -> tags, created_at
           version_data=$(echo "$versions" | jq -r '.[] | "\(.id)\t\(.metadata.container.tags | join(","))\t\(.created_at)"')
 
+          # Build maps: version_id -> digest, version_id -> created_at.
+          # We need the digest later to fetch the manifest of each kept
+          # version (so we can collect any platform-child manifest digests it
+          # references and protect them from orphan deletion). We need
+          # created_at for an optimisation that skips manifest fetches for
+          # kept versions older than the oldest orphan candidate, since
+          # multi-arch pushes always create the index after its children, so
+          # an older kept index cannot reference a newer untagged version.
+          declare -A version_id_to_digest
+          declare -A version_id_to_created_at
+          while IFS=$'\t' read -r dvid digest cat; do
+            if [[ -n "$dvid" ]]; then
+              version_id_to_digest["$dvid"]="$digest"
+              version_id_to_created_at["$dvid"]="$cat"
+            fi
+          done <<< "$(echo "$versions" | jq -r '.[] | "\(.id)\t\(.name)\t\(.created_at)"')"
+
           declare -A branch_versions  # branch -> list of "created_at:version_id"
           declare -a orphan_versions   # versions whose SHA matches no existing branch
+          declare -a kept_version_ids  # versions we end up keeping (latest-only or top-N per branch)
 
           while IFS=$'\t' read -r vid tags created_at; do
             [[ -z "$vid" ]] && continue
@@ -95,11 +114,13 @@ jobs:
               # If it has "latest" tag, keep it (it's the current main image)
               if echo "$tags" | grep -qw "latest"; then
                 kept_count=$((kept_count + 1))
+                kept_version_ids+=("${vid}")
                 continue
               fi
-              # Untagged image, treat as orphan
+              # Untagged image. May be either a true orphan, or a child
+              # manifest of a multi-arch index we are keeping. Defer the
+              # decision until we have computed the protected child digests.
               orphan_versions+=("${vid}")
-              orphan_count=$((orphan_count + 1))
               continue
             fi
 
@@ -111,9 +132,11 @@ jobs:
               # and find branches that contain it
               commit_branches=$(gh api "repos/${REPO}/commits/${sha}" --jq '.sha' 2>/dev/null || echo "")
               if [[ -z "$commit_branches" ]]; then
-                # Commit doesn't exist anymore (force-pushed away)
+                # Commit doesn't exist anymore (force-pushed away).
+                # Treat as orphan candidate. Final orphan count is recomputed
+                # after the protection-pass filters out versions referenced
+                # by kept indexes.
                 orphan_versions+=("${vid}")
-                orphan_count=$((orphan_count + 1))
                 continue
               fi
 
@@ -130,7 +153,6 @@ jobs:
 
               if [[ -z "$found_branch" ]]; then
                 orphan_versions+=("${vid}")
-                orphan_count=$((orphan_count + 1))
                 continue
               fi
               commit_branches="$found_branch"
@@ -183,6 +205,15 @@ jobs:
                 branch_deleted=$((branch_deleted + 1))
               done <<< "$to_delete"
 
+              # Track each kept version's id so the protection step below
+              # can fetch its manifest and protect any platform-child
+              # manifests it references from being treated as orphans.
+              while IFS= read -r entry; do
+                [[ -z "$entry" ]] && continue
+                kvid="${entry#*:}"
+                kept_version_ids+=("$kvid")
+              done <<< "$to_keep"
+
               kept_count=$((kept_count + branch_kept))
               echo "| \`${branch}\` | ${branch_total} | ${branch_kept} | ${branch_deleted} |" >> $GITHUB_STEP_SUMMARY
             else
@@ -205,6 +236,143 @@ jobs:
               echo "| ~~\`${branch}\`~~ (deleted) | ${branch_total} | 0 | ${branch_total} |" >> $GITHUB_STEP_SUMMARY
             fi
           done
+
+          # ---------------------------------------------------------------
+          # Protect children of kept multi-arch indexes.
+          #
+          # GHCR stores a multi-arch image as several rows in the package
+          # versions API. The OCI image index manifest (the wrapper) is the
+          # one that carries the user-facing tag like a short SHA or
+          # "latest". Each platform-specific child manifest (e.g. linux
+          # amd64) and the build-attestation manifest are stored as
+          # separate, *untagged* rows. The categorisation loop above
+          # therefore puts those children into orphan_versions purely
+          # because they have no tag, even though they are alive children
+          # of an index we are keeping.
+          #
+          # Without protection, deleting them leaves the still-tagged
+          # index pointing at a missing child digest, which means anything
+          # trying to pull the tagged image gets a 404 on the manifest hop.
+          #
+          # The protection step fetches each kept version's manifest from
+          # ghcr.io directly, parses the OCI index body, and collects the
+          # digest of every child it references into protected_digests.
+          # The orphan deletion below then drops any version whose own
+          # digest is in protected_digests.
+          # ---------------------------------------------------------------
+
+          declare -A protected_digests
+          declare -A fetched_digests   # memoise: avoid re-fetching the same digest
+          fetch_failed=false
+
+          if [[ ${#orphan_versions[@]} -eq 0 ]]; then
+            # Nothing to protect, skip the step entirely so the steady-state
+            # cost (when there is no cleanup to do) is zero ghcr.io requests.
+            echo "No orphan candidates after categorisation, skipping child-protection step."
+          elif [[ ${#kept_version_ids[@]} -eq 0 ]]; then
+            # No kept versions to walk, every orphan candidate is a real orphan.
+            echo "No kept versions found, all orphan candidates are real orphans."
+          else
+            echo "Computing protected child digests for ${#kept_version_ids[@]} kept version(s)..."
+
+            # Date cutoff. Multi-arch pushes always create the platform
+            # child manifests *before* the index that references them, so a
+            # child's created_at is always <= its index's created_at. The
+            # oldest possible index that could reference a given orphan
+            # candidate is therefore the one created at-or-after the orphan's
+            # own created_at (minus a small clock-skew buffer). Anything
+            # older than that cannot reference this batch of orphans.
+            cutoff_epoch=0
+            oldest_orphan_ts=""
+            for ovid in "${orphan_versions[@]}"; do
+              ts="${version_id_to_created_at[$ovid]:-}"
+              [[ -z "$ts" ]] && continue
+              if [[ -z "$oldest_orphan_ts" || "$ts" < "$oldest_orphan_ts" ]]; then
+                oldest_orphan_ts="$ts"
+              fi
+            done
+            if [[ -n "$oldest_orphan_ts" ]]; then
+              cutoff_epoch=$(($(date -u -d "$oldest_orphan_ts" +%s) - 60))
+            fi
+
+            # Get a registry pull token for ghcr.io. The workflow token
+            # already has packages: write permission, so a pull-scoped
+            # registry token is granted by exchanging it on the
+            # ghcr.io/token endpoint.
+            REGISTRY_TOKEN=$(curl -fsS -u "${GH_ACTOR}:${GH_TOKEN}" \
+              "https://ghcr.io/token?service=ghcr.io&scope=repository:${OWNER}/${PACKAGE_NAME}:pull" \
+              2>/dev/null | jq -r .token 2>/dev/null || echo "")
+
+            if [[ -z "$REGISTRY_TOKEN" || "$REGISTRY_TOKEN" == "null" ]]; then
+              # If we cannot authenticate, we cannot enumerate protected
+              # children. Refuse to delete any orphan candidate so we do
+              # not corrupt tagged images.
+              echo "WARNING: Could not obtain ghcr.io registry pull token. Skipping orphan deletion to avoid corrupting tagged images."
+              fetch_failed=true
+            else
+              for kvid in "${kept_version_ids[@]}"; do
+                kept_digest="${version_id_to_digest[$kvid]:-}"
+                [[ -z "$kept_digest" || "$kept_digest" == "null" ]] && continue
+
+                # Memoise per digest. Two different version rows can in rare
+                # cases share the same digest (retag without rebuild).
+                # Fetching the same manifest twice is just waste.
+                [[ -n "${fetched_digests[$kept_digest]:-}" ]] && continue
+                fetched_digests["$kept_digest"]=1
+
+                # Skip if older than the oldest orphan minus the buffer.
+                # Saves the network round-trip for older kept indexes that
+                # cannot possibly reference this run's orphan candidates.
+                kept_ts="${version_id_to_created_at[$kvid]:-}"
+                if [[ -n "$kept_ts" && $cutoff_epoch -gt 0 ]]; then
+                  kept_epoch=$(date -u -d "$kept_ts" +%s 2>/dev/null || echo 0)
+                  if [[ $kept_epoch -lt $cutoff_epoch ]]; then
+                    continue
+                  fi
+                fi
+
+                # Fetch the manifest body. If the kept version is an OCI
+                # image index, its body has a `manifests` array listing each
+                # child by digest. If it is a single-arch image manifest
+                # there is no `manifests` array and jq returns nothing.
+                manifest=$(curl -fsS \
+                  -H "Authorization: Bearer ${REGISTRY_TOKEN}" \
+                  -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json" \
+                  "https://ghcr.io/v2/${OWNER}/${PACKAGE_NAME}/manifests/${kept_digest}" \
+                  2>/dev/null) || { fetch_failed=true; break; }
+
+                while IFS= read -r child; do
+                  [[ -n "$child" && "$child" != "null" ]] && protected_digests["$child"]=1
+                done <<< "$(echo "$manifest" | jq -r '.manifests[]?.digest // empty' 2>/dev/null || echo "")"
+              done
+            fi
+
+            if [[ "$fetch_failed" == "true" ]]; then
+              # Conservative fallback: if any manifest failed to fetch, we
+              # do not have a complete picture of protected children, so
+              # we cannot safely classify any candidate as a real orphan.
+              echo "WARNING: Failed to fetch one or more kept manifests. Skipping orphan deletion to avoid corrupting tagged images."
+              orphan_versions=()
+            else
+              # Filter orphan_versions: drop entries whose own digest is
+              # referenced by a kept index, those are platform children we
+              # must not delete.
+              filtered_orphans=()
+              for vid in "${orphan_versions[@]}"; do
+                vd="${version_id_to_digest[$vid]:-}"
+                if [[ -n "$vd" && -n "${protected_digests[$vd]:-}" ]]; then
+                  echo "Protecting version ${vid} (${vd}), referenced as child of a kept index"
+                else
+                  filtered_orphans+=("$vid")
+                fi
+              done
+              orphan_versions=("${filtered_orphans[@]}")
+            fi
+          fi
+
+          # Re-set orphan_count from the (possibly filtered) array so the
+          # summary table below shows the actual number we are deleting.
+          orphan_count=${#orphan_versions[@]}
 
           # Delete orphan versions (no branch association)
           if [[ ${#orphan_versions[@]} -gt 0 ]]; then
