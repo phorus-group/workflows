@@ -186,28 +186,16 @@ jobs:
           echo "tag_name=$TAG" >> $GITHUB_OUTPUT
           echo "Resolved tag: $TAG"
 
-      - name: Check for existing release or tag
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Check for existing tag
         run: |
           TAG="${{ steps.resolve-tag.outputs.tag_name }}"
 
-          # Check if a GitHub release already exists for this tag (draft or published)
-          EXISTING_RELEASE=$(gh api "repos/${{ github.repository }}/releases/tags/$TAG" 2>/dev/null || echo "")
-          if [[ -n "$EXISTING_RELEASE" ]]; then
-            RELEASE_URL=$(echo "$EXISTING_RELEASE" | jq -r '.html_url')
-            IS_DRAFT=$(echo "$EXISTING_RELEASE" | jq -r '.draft')
-            echo "::error::A release for tag $TAG already exists (draft=$IS_DRAFT): $RELEASE_URL"
-            exit 1
-          fi
-
-          # Check if the git tag already exists (even without a release)
           if git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
             echo "::error::Git tag $TAG already exists. Delete the tag first or bump the version."
             exit 1
           fi
 
-          echo "No existing release or tag found for $TAG"
+          echo "No existing tag found for $TAG"
 
       - name: Get previous release tag
         id: prev-tag
