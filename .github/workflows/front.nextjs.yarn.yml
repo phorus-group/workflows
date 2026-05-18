@@ -210,8 +210,8 @@ jobs:
           retention-days: 2
           path: test/.merged-unit-coverage/coverage-final.json
 
-      - name: Upload to Codecov (when integration tests are disabled)
-        if: ${{ !cancelled() && inputs.disable-integration-test == 'true' && env.CODECOV_TOKEN != '' }}
+      - name: Upload merged unit + storybook coverage to Codecov
+        if: ${{ !cancelled() && env.CODECOV_TOKEN != '' }}
         uses: codecov/codecov-action@v5
         env:
           CODECOV_TOKEN: ${{ secrets.codecov-token }}
@@ -266,21 +266,6 @@ jobs:
         with:
           command: test:integration
           test-label: Integration
-          artifact-suffix: integration
-          codecov-token: ${{ inputs.disable-unit-test == 'true' && secrets.codecov-token || '' }}
-
-  merge-test-reports:
-    name: Merge test reports
-    if: ${{ !failure() && !cancelled() && inputs.disable-unit-test != 'true' && inputs.disable-integration-test != 'true' }}
-    needs: [unit-test, integration-test]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Merge test reports
-        uses: phorus-group/yarn-merge-reports-action@main
-        with:
-          test-artifact-1: coverage-unit
-          test-artifact-2: coverage-integration
-          codecov-token: ${{ secrets.codecov-token }}
 
   # This is giving us issues with GHA runners, so we are disabling it for now
   # code-quality:
