@@ -69,6 +69,38 @@ jobs:
           branches=$(gh api --paginate "repos/${REPO}/branches" --jq '.[].name' 2>/dev/null || echo "")
           branch_list=$(echo "$branches" | tr '\n' '|')
 
+          # Protect images built from a published release. Deploys run release images,
+          # whose commit is usually an older ancestor of a branch, so the per-branch
+          # keep-top-N pass below would age them out and orphan-delete their children.
+          echo "Fetching published releases..."
+          if ! releases_json=$(gh api --paginate "repos/${REPO}/releases" 2>/dev/null); then
+            echo "ERROR: Failed to fetch releases for ${REPO}. Aborting before any deletion to avoid removing a deployed release image." >&2
+            exit 1
+          fi
+          release_tags=$(echo "$releases_json" | jq -r '.[] | select(.draft == false) | .tag_name' 2>/dev/null || echo "")
+          release_count=$(echo "$release_tags" | grep -c . || true)
+          echo "Found ${release_count} published release(s)."
+
+          declare -A protected_release_shas
+          while IFS= read -r rtag; do
+            [[ -z "$rtag" ]] && continue
+            full_sha=$(gh api "repos/${REPO}/commits/${rtag}" --jq '.sha' 2>/dev/null || echo "")
+            if [[ -z "$full_sha" || "$full_sha" == "null" ]]; then
+              echo "  WARNING: could not resolve release tag '${rtag}' to a commit SHA"
+              continue
+            fi
+            short_sha="${full_sha:0:7}"
+            protected_release_shas["$short_sha"]=1
+            echo "  Release '${rtag}' -> protected commit ${short_sha}"
+          done <<< "$release_tags"
+
+          # Releases exist but none resolved to a SHA, so the releases API or tag resolution is broken and we stop before deleting anything.
+          if [[ "$release_count" -gt 0 && ${#protected_release_shas[@]} -eq 0 ]]; then
+            echo "ERROR: Found ${release_count} published release(s) but resolved 0 protected commit SHAs. Aborting before any deletion." >&2
+            exit 1
+          fi
+          echo "Resolved ${#protected_release_shas[@]} protected release commit SHA(s)."
+
           # Group versions by branch using their SHA tags
           # Tags are: short SHA (always), "latest" (main only)
           # We resolve each SHA to its branch(es)
@@ -96,6 +128,7 @@ jobs:
           declare -A branch_versions  # branch -> list of "created_at:version_id"
           declare -a orphan_versions   # versions whose SHA matches no existing branch
           declare -a kept_version_ids  # versions we end up keeping (latest-only or top-N per branch)
+          protected_release_matched=0  # how many image versions matched a protected release SHA
 
           while IFS=$'\t' read -r vid tags created_at; do
             [[ -z "$vid" ]] && continue
@@ -121,6 +154,15 @@ jobs:
               # manifest of a multi-arch index we are keeping. Defer the
               # decision until we have computed the protected child digests.
               orphan_versions+=("${vid}")
+              continue
+            fi
+
+            # Keep images built from a protected release, which also protects their children via kept_version_ids.
+            if [[ -n "${protected_release_shas[${sha:0:7}]:-}" ]]; then
+              kept_count=$((kept_count + 1))
+              kept_version_ids+=("${vid}")
+              protected_release_matched=$((protected_release_matched + 1))
+              echo "Keeping version ${vid} (${sha}) - built from a protected release"
               continue
             fi
 
@@ -164,6 +206,13 @@ jobs:
 
           done <<< "$version_data"
 
+          # Resolved release SHAs but no image matched them, so our view of the versions is wrong and we stop before deleting anything.
+          if [[ ${#protected_release_shas[@]} -gt 0 && "$protected_release_matched" -eq 0 ]]; then
+            echo "ERROR: Resolved ${#protected_release_shas[@]} release commit SHA(s) but 0 image versions matched any of them. Aborting before any deletion." >&2
+            exit 1
+          fi
+          echo "Protected ${protected_release_matched} image version(s) as release builds."
+
           # Process each branch: sort by date, keep N most recent, delete the rest
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Per-branch retention" >> $GITHUB_STEP_SUMMARY
@@ -191,7 +240,7 @@ jobs:
 
               while IFS= read -r entry; do
                 [[ -z "$entry" ]] && continue
-                vid="${entry#*:}"
+                vid="${entry##*:}"
                 if [[ "$DRY_RUN" == "true" ]]; then
                   echo "[DRY RUN] Would delete version ${vid} from branch ${branch}"
                 else
@@ -210,7 +259,7 @@ jobs:
               # manifests it references from being treated as orphans.
               while IFS= read -r entry; do
                 [[ -z "$entry" ]] && continue
-                kvid="${entry#*:}"
+                kvid="${entry##*:}"
                 kept_version_ids+=("$kvid")
               done <<< "$to_keep"
 
@@ -220,7 +269,7 @@ jobs:
               # Branch deleted, remove all versions
               while IFS= read -r entry; do
                 [[ -z "$entry" ]] && continue
-                vid="${entry#*:}"
+                vid="${entry##*:}"
                 if [[ "$DRY_RUN" == "true" ]]; then
                   echo "[DRY RUN] Would delete version ${vid} (branch ${branch} no longer exists)"
                 else
