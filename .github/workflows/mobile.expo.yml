@@ -1,0 +1,86 @@
+name: Reusable workflow to build and deploy an Expo app to the app stores via EAS
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        description: "Platform to build: ios, android or all"
+        type: string
+        required: false
+        default: "all"
+      profile:
+        description: "EAS build profile from eas.json. With auto-submit enabled, the submit profile with the same name is used"
+        type: string
+        required: false
+        default: "production"
+      auto-submit:
+        description: "Auto-submit the build to the stores on success. Android goes to the track configured in the submit profile; iOS lands in TestFlight"
+        type: boolean
+        required: false
+        default: true
+      ota:
+        description: "Use fingerprint-based continuous deploy instead of always building: publishes an OTA update when the native fingerprint is unchanged, builds otherwise. Requires expo-updates and the fingerprint runtimeVersion policy"
+        type: boolean
+        required: false
+        default: false
+      no-wait:
+        description: "Exit as soon as the build is queued on EAS instead of blocking the runner until it finishes. Note: with no-wait, an EAS build failure will not fail the workflow"
+        type: boolean
+        required: false
+        default: true
+      environment:
+        description: "GitHub Environment name. Used for approval gates and environment-specific secrets"
+        type: string
+        required: false
+        default: "production"
+      node-version:
+        description: "Node.js version used to install dependencies"
+        type: string
+        required: false
+        default: "24"
+      working-directory:
+        description: "Directory containing the Expo app"
+        type: string
+        required: false
+        default: "."
+    secrets:
+      expo-token:
+        description: "Expo access token used to authenticate the EAS CLI (a robot token is recommended)"
+        required: true
+
+jobs:
+  deploy:
+    name: Deploy Expo app (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    concurrency:
+      group: mobile-deploy-${{ inputs.environment }}-${{ github.repository }}
+      cancel-in-progress: false
+    environment:
+      name: ${{ inputs.environment }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.working-directory }}
+        run: npm ci
+
+      - name: Deploy via EAS
+        uses: phorus-group/expo-deploy-action@main
+        with:
+          expo-token: ${{ secrets.expo-token }}
+          platform: ${{ inputs.platform }}
+          profile: ${{ inputs.profile }}
+          auto-submit: ${{ inputs.auto-submit }}
+          ota: ${{ inputs.ota }}
+          no-wait: ${{ inputs.no-wait }}
+          working-directory: ${{ inputs.working-directory }}
