@@ -63,16 +63,36 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Detect the package manager from the committed lockfile so this
+      # workflow works for both yarn and npm app repos.
+      - name: Detect package manager
+        id: pm
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if [ -f yarn.lock ]; then
+            echo "cache=yarn"                      >> "$GITHUB_OUTPUT"
+            echo "lockfile=yarn.lock"              >> "$GITHUB_OUTPUT"
+            echo "install=yarn install --frozen-lockfile" >> "$GITHUB_OUTPUT"
+          elif [ -f package-lock.json ]; then
+            echo "cache=npm"                       >> "$GITHUB_OUTPUT"
+            echo "lockfile=package-lock.json"      >> "$GITHUB_OUTPUT"
+            echo "install=npm ci"                  >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::No yarn.lock or package-lock.json found in ${{ inputs.working-directory }}"
+            exit 1
+          fi
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version }}
-          cache: npm
-          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+          cache: ${{ steps.pm.outputs.cache }}
+          cache-dependency-path: ${{ inputs.working-directory }}/${{ steps.pm.outputs.lockfile }}
 
       - name: Install dependencies
         working-directory: ${{ inputs.working-directory }}
-        run: npm ci
+        run: ${{ steps.pm.outputs.install }}
 
       - name: Deploy via EAS
         uses: phorus-group/expo-deploy-action@main
