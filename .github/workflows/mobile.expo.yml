@@ -1,35 +1,22 @@
 name: Reusable workflow to build and deploy an Expo app to the app stores via EAS
 
+# Splits the pipeline into four independent status checks so you can see
+# exactly which stage failed:
+#   build-android  -> submit-android
+#   build-ios      -> submit-ios
+# Android and iOS run in parallel. Each build job WAITS for EAS to finish,
+# so a red check means a real build/submit failure (not just "queued").
+
 on:
   workflow_call:
     inputs:
-      platform:
-        description: "Platform to build: ios, android or all"
-        type: string
-        required: false
-        default: "all"
       profile:
-        description: "EAS build profile from eas.json. With auto-submit enabled, the submit profile with the same name is used"
+        description: "EAS build/submit profile from eas.json"
         type: string
         required: false
         default: "production"
-      auto-submit:
-        description: "Auto-submit the build to the stores on success. Android goes to the track configured in the submit profile; iOS lands in TestFlight"
-        type: boolean
-        required: false
-        default: true
-      ota:
-        description: "Use fingerprint-based continuous deploy instead of always building: publishes an OTA update when the native fingerprint is unchanged, builds otherwise. Requires expo-updates and the fingerprint runtimeVersion policy"
-        type: boolean
-        required: false
-        default: false
-      no-wait:
-        description: "Exit as soon as the build is queued on EAS instead of blocking the runner until it finishes. Note: with no-wait, an EAS build failure will not fail the workflow"
-        type: boolean
-        required: false
-        default: true
       environment:
-        description: "GitHub Environment name. Used for approval gates and environment-specific secrets"
+        description: "GitHub Environment name (approval gates / environment secrets)"
         type: string
         required: false
         default: "production"
@@ -49,38 +36,34 @@ on:
         required: true
 
 jobs:
-  deploy:
-    name: Deploy Expo app (${{ inputs.environment }})
+  build-android:
+    name: Build Android
     runs-on: ubuntu-latest
-    concurrency:
-      group: mobile-deploy-${{ inputs.environment }}-${{ github.repository }}
-      cancel-in-progress: false
     environment:
       name: ${{ inputs.environment }}
     permissions:
       contents: read
+    outputs:
+      build-id: ${{ steps.build.outputs.build-id }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Detect the package manager from the committed lockfile so this
-      # workflow works for both yarn and npm app repos.
       - name: Detect package manager
         id: pm
         shell: bash
         working-directory: ${{ inputs.working-directory }}
         run: |
           if [ -f yarn.lock ]; then
-            echo "cache=yarn"                      >> "$GITHUB_OUTPUT"
-            echo "lockfile=yarn.lock"              >> "$GITHUB_OUTPUT"
+            echo "cache=yarn"                             >> "$GITHUB_OUTPUT"
+            echo "lockfile=yarn.lock"                     >> "$GITHUB_OUTPUT"
             echo "install=yarn install --frozen-lockfile" >> "$GITHUB_OUTPUT"
           elif [ -f package-lock.json ]; then
-            echo "cache=npm"                       >> "$GITHUB_OUTPUT"
-            echo "lockfile=package-lock.json"      >> "$GITHUB_OUTPUT"
-            echo "install=npm ci"                  >> "$GITHUB_OUTPUT"
+            echo "cache=npm"                              >> "$GITHUB_OUTPUT"
+            echo "lockfile=package-lock.json"             >> "$GITHUB_OUTPUT"
+            echo "install=npm ci"                         >> "$GITHUB_OUTPUT"
           else
-            echo "::error::No yarn.lock or package-lock.json found in ${{ inputs.working-directory }}"
-            exit 1
+            echo "::error::No yarn.lock or package-lock.json found in ${{ inputs.working-directory }}"; exit 1
           fi
 
       - name: Setup Node.js
@@ -94,13 +77,117 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         run: ${{ steps.pm.outputs.install }}
 
-      - name: Deploy via EAS
+      - name: Build Android
+        id: build
         uses: phorus-group/expo-deploy-action@main
         with:
           expo-token: ${{ secrets.expo-token }}
-          platform: ${{ inputs.platform }}
+          command: build
+          platform: android
           profile: ${{ inputs.profile }}
-          auto-submit: ${{ inputs.auto-submit }}
-          ota: ${{ inputs.ota }}
-          no-wait: ${{ inputs.no-wait }}
+          working-directory: ${{ inputs.working-directory }}
+
+  submit-android:
+    name: Submit Android
+    needs: build-android
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.environment }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Submit Android
+        uses: phorus-group/expo-deploy-action@main
+        with:
+          expo-token: ${{ secrets.expo-token }}
+          command: submit
+          platform: android
+          profile: ${{ inputs.profile }}
+          build-id: ${{ needs.build-android.outputs.build-id }}
+          working-directory: ${{ inputs.working-directory }}
+
+  build-ios:
+    name: Build iOS
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.environment }}
+    permissions:
+      contents: read
+    outputs:
+      build-id: ${{ steps.build.outputs.build-id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect package manager
+        id: pm
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if [ -f yarn.lock ]; then
+            echo "cache=yarn"                             >> "$GITHUB_OUTPUT"
+            echo "lockfile=yarn.lock"                     >> "$GITHUB_OUTPUT"
+            echo "install=yarn install --frozen-lockfile" >> "$GITHUB_OUTPUT"
+          elif [ -f package-lock.json ]; then
+            echo "cache=npm"                              >> "$GITHUB_OUTPUT"
+            echo "lockfile=package-lock.json"             >> "$GITHUB_OUTPUT"
+            echo "install=npm ci"                         >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::No yarn.lock or package-lock.json found in ${{ inputs.working-directory }}"; exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ steps.pm.outputs.cache }}
+          cache-dependency-path: ${{ inputs.working-directory }}/${{ steps.pm.outputs.lockfile }}
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ steps.pm.outputs.install }}
+
+      - name: Build iOS
+        id: build
+        uses: phorus-group/expo-deploy-action@main
+        with:
+          expo-token: ${{ secrets.expo-token }}
+          command: build
+          platform: ios
+          profile: ${{ inputs.profile }}
+          working-directory: ${{ inputs.working-directory }}
+
+  submit-ios:
+    name: Submit iOS
+    needs: build-ios
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.environment }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Submit iOS
+        uses: phorus-group/expo-deploy-action@main
+        with:
+          expo-token: ${{ secrets.expo-token }}
+          command: submit
+          platform: ios
+          profile: ${{ inputs.profile }}
+          build-id: ${{ needs.build-ios.outputs.build-id }}
           working-directory: ${{ inputs.working-directory }}
