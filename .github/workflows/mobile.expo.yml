@@ -99,10 +99,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Detect package manager
+        id: pm
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if [ -f yarn.lock ]; then
+            echo "cache=yarn"                             >> "$GITHUB_OUTPUT"
+            echo "lockfile=yarn.lock"                     >> "$GITHUB_OUTPUT"
+            echo "install=yarn install --frozen-lockfile" >> "$GITHUB_OUTPUT"
+          elif [ -f package-lock.json ]; then
+            echo "cache=npm"                              >> "$GITHUB_OUTPUT"
+            echo "lockfile=package-lock.json"             >> "$GITHUB_OUTPUT"
+            echo "install=npm ci"                         >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::No yarn.lock or package-lock.json found in ${{ inputs.working-directory }}"; exit 1
+          fi
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version }}
+          cache: ${{ steps.pm.outputs.cache }}
+          cache-dependency-path: ${{ inputs.working-directory }}/${{ steps.pm.outputs.lockfile }}
+
+      # eas submit reads app config, which resolves config plugins
+      # (e.g. expo-router) and therefore needs node_modules present.
+      - name: Install dependencies
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ steps.pm.outputs.install }}
 
       - name: Submit Android
         uses: phorus-group/expo-deploy-action@main
@@ -177,10 +202,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Detect package manager
+        id: pm
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if [ -f yarn.lock ]; then
+            echo "cache=yarn"                             >> "$GITHUB_OUTPUT"
+            echo "lockfile=yarn.lock"                     >> "$GITHUB_OUTPUT"
+            echo "install=yarn install --frozen-lockfile" >> "$GITHUB_OUTPUT"
+          elif [ -f package-lock.json ]; then
+            echo "cache=npm"                              >> "$GITHUB_OUTPUT"
+            echo "lockfile=package-lock.json"             >> "$GITHUB_OUTPUT"
+            echo "install=npm ci"                         >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::No yarn.lock or package-lock.json found in ${{ inputs.working-directory }}"; exit 1
+          fi
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version }}
+          cache: ${{ steps.pm.outputs.cache }}
+          cache-dependency-path: ${{ inputs.working-directory }}/${{ steps.pm.outputs.lockfile }}
+
+      # eas submit reads app config, which resolves config plugins
+      # (e.g. expo-router) and therefore needs node_modules present.
+      - name: Install dependencies
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ steps.pm.outputs.install }}
 
       - name: Submit iOS
         uses: phorus-group/expo-deploy-action@main
